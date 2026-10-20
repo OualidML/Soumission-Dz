@@ -10,114 +10,18 @@ export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /**
- * Synthesizes domain-appropriate BPU rows for custom uploaded tenders
- * when no tabular pricing is explicitly parsed from the document text.
- * Prevents Sonelgaz solar demo rows from bleeding into healthcare, IT, or general tenders.
- */
-function synthesizeCustomBpuItems(rawText: string): BpuItem[] {
-  const lower = (rawText || '').toLowerCase();
-
-  // Healthcare / Medical Domain
-  if (
-    lower.includes('santé') ||
-    lower.includes('médic') ||
-    lower.includes('chu') ||
-    lower.includes('hôpital') ||
-    lower.includes('clinique') ||
-    lower.includes('biomédical')
-  ) {
-    return [
-      {
-        code: 'LOT-01',
-        designation: 'Maintenance préventive et corrective des équipements biomédicaux',
-        unit: 'Forfait',
-        qty: 1,
-        unitPriceHT: 4500000,
-        claimedTotalHT: 4500000,
-        tvaRate: 19,
-      },
-      {
-        code: 'LOT-02',
-        designation: 'Fourniture de consommables et pièces de rechange certifiées CE/ISO',
-        unit: 'Lot',
-        qty: 10,
-        unitPriceHT: 350000,
-        claimedTotalHT: 3500000,
-        tvaRate: 19,
-      },
-    ];
-  }
-
-  // Information Technology / Software / Digital Domain
-  if (
-    lower.includes('logiciel') ||
-    lower.includes('informatique') ||
-    lower.includes('cloud') ||
-    lower.includes('système') ||
-    lower.includes('réseau') ||
-    lower.includes('données') ||
-    lower.includes('cyber') ||
-    lower.includes('serveur')
-  ) {
-    return [
-      {
-        code: 'LOT-01',
-        designation: 'Développement, intégration et déploiement de la solution logicielle',
-        unit: 'Forfait',
-        qty: 1,
-        unitPriceHT: 6000000,
-        claimedTotalHT: 6000000,
-        tvaRate: 19,
-      },
-      {
-        code: 'LOT-02',
-        designation: 'Fourniture d\'infrastructure système et support technique annuel',
-        unit: 'Mois',
-        qty: 12,
-        unitPriceHT: 250000,
-        claimedTotalHT: 3000000,
-        tvaRate: 19,
-      },
-    ];
-  }
-
-  // Default Algerian Public Procurement General Supply & Services
-  return [
-    {
-      code: 'LOT-01',
-      designation: 'Prestation principale selon bordereau des prix unitaires contractuel',
-      unit: 'Forfait',
-      qty: 1,
-      unitPriceHT: 5000000,
-      claimedTotalHT: 5000000,
-      tvaRate: 19,
-    },
-    {
-      code: 'LOT-02',
-      designation: 'Fourniture, transport et mise en service des équipements associés',
-      unit: 'Lot',
-      qty: 2,
-      unitPriceHT: 1200000,
-      claimedTotalHT: 2400000,
-      tvaRate: 19,
-    },
-  ];
-}
-
-/**
  * Helper to parse BPU items from custom raw text if tabular pricing is detected.
  */
 function extractBpuItemsFromRawText(text: string): BpuItem[] | null {
   if (!text) return null;
   const items: BpuItem[] = [];
 
-  // Look for LOT/MOD/ART patterns with numbers
+  // Look for LOT/MOD/ART/POSTE patterns with numbers
   const lines = text.split('\n');
   let index = 1;
 
   for (const line of lines) {
-    // Matches patterns like: LOT-01 Description ... Qte: 5 ... PU: 12000000 ... Total: 60000000
-    const itemMatch = line.match(/(?:LOT|MOD|ART|ITEM)[-_\s]?0?([0-9]+)[\s:.-]+([^,;\t\n]+)/i);
+    const itemMatch = line.match(/(?:LOT|MOD|ART|ITEM|POSTE|ARTICLE)[-_\s]?0?([0-9]+)[\s:.-]+([^,;\t\n]+)/i);
     const numbersMatch = line.match(/([0-9]{1,3}(?:[ .][0-9]{3})*|[0-9]+)/g);
 
     if (itemMatch && numbersMatch && numbersMatch.length >= 2) {
@@ -160,6 +64,7 @@ export async function POST(req: NextRequest) {
     const isCustomUpload: boolean = Boolean(
       body.isCustomUpload ||
       tenderData?.id === 'custom-tender' ||
+      tenderData?.id === 'custom' ||
       tenderData?.id?.startsWith('DOC-') ||
       tenderData?.id?.startsWith('custom')
     );
@@ -196,6 +101,7 @@ export async function POST(req: NextRequest) {
 
     // Check for custom extracted BPU rows from uploaded PDF/custom text
     // NEVER bleed demo BPU items into a custom document upload
+    // If PDF parser fails to extract the table, report 'BPU Data Not Found' rather than claiming Zero Errors
     let activeBpuItems: BpuItem[] = [];
 
     if (isCustomUpload) {
@@ -203,7 +109,8 @@ export async function POST(req: NextRequest) {
       if (customBpuItems && customBpuItems.length > 0) {
         activeBpuItems = customBpuItems;
       } else {
-        activeBpuItems = synthesizeCustomBpuItems(rawTenderText);
+        // Do NOT invent mock tables. Keep activeBpuItems empty so bpu-math flags BPU Data Not Found
+        activeBpuItems = [];
       }
     } else {
       activeBpuItems =
@@ -222,18 +129,27 @@ export async function POST(req: NextRequest) {
 
     // =========================================================================
     // STEP 1 — Agent Pass 1 (Extractor & Mémoire Drafter) via Gemma 4
+    // STRICT CONTEXT: Force model to use ONLY provided document text
     // =========================================================================
     const pass1Prompt = `
 You are executing SKILL: ${extractorSkill.metadata.name}
 Instructions:
 ${extractorSkill.instructions}
 
+CRITICAL STRICT CONTEXT RULE:
+You MUST base your analysis STRICTLY and EXCLUSIVELY on the actual document text provided below.
+DO NOT rely on cached or pre-baked scenarios (such as Sonelgaz or CHU unless explicitly written below).
+Analyze the actual clauses, requirements, and scope described in the text.
+
 Tender Title: ${tenderData.title}
 Tender Reference: ${tenderData.reference}
 Contracting Authority: ${tenderData.authority}
 Sector: ${tenderData.sector}
-Raw Cahier des Charges (CPS/CCAG):
-${rawTenderText}
+
+ACTUAL DOCUMENT TEXT (From uploaded PDF/Document):
+--- BEGIN DOCUMENT TEXT ---
+${rawTenderText.slice(0, 15000)}
+--- END DOCUMENT TEXT ---
 
 Bidder Company Profile:
 ${JSON.stringify(companyProfile, null, 2)}
@@ -244,7 +160,7 @@ Mandate:
    - Envelope B (Offre Technique)
    - Envelope C (Offre Financière)
    For each document, specify whether the bidder satisfies it (COMPLIANT) or lacks it (NON_COMPLIANT).
-2. Draft a formal French "Mémoire Technique Justificatif" tailored to this specific tender.
+2. Draft a formal French "Mémoire Technique Justificatif" tailored specifically to the actual requirements of this tender.
 `;
 
     let gemmaPass1Thought = '';
@@ -295,25 +211,31 @@ You are executing SKILL: ${criticSkill.metadata.name}
 Instructions:
 ${criticSkill.instructions}
 
-CRITICAL ANTI-CONTRADICTION INSTRUCTION:
+CRITICAL ANTI-CONTRADICTION & STRICT CONTEXT INSTRUCTION:
 You are the strict President of the COPEO. Your verdict MUST be 100% consistent with Pass 1 and the Deterministic Math Engine.
+DO NOT use cached or demo scenarios (such as Sonelgaz or CHU unless explicitly written in the tender text below).
+Analyze the actual uploaded document and bidder qualifications.
 
 Pass 1 Missing Documents (Defects Found):
 ${JSON.stringify(missingItems, null, 2)}
 
-Deterministic BPU Math Errors Found:
+Deterministic BPU Math Status:
+Status: ${bpuAudit.status || 'AUDITED'}
+${bpuAudit.status === 'BPU_DATA_NOT_FOUND' ? 'CRITICAL ALERT: BPU Data Not Found in the document! Financial Offer cannot be verified.' : ''}
+Deterministic BPU Math Errors / Warnings Found:
 ${JSON.stringify(bpuMathErrors, null, 2)}
 
 Bidder Profile:
 ${JSON.stringify(companyProfile, null, 2)}
 
-Tender Eliminatory Clauses:
-${rawTenderText.slice(0, 3000)}
+Tender Eliminatory Clauses & Document Excerpt:
+${rawTenderText.slice(0, 5000)}
 
 Rules:
-1. Every item in missingItems and bpuMathErrors MUST appear in your criticalTrapsFound list.
-2. If missingItems.length > 0 or bpuMathErrors.length > 0, eliminationRiskPercent MUST be >= 15% (triggering CRITICAL_DISQUALIFICATION_WARNING).
-3. If the bidder is a Labelled Startup and the tender allows Loi 23-12 Art. 87 exemptions, confirm the exemptions and verify if risk is under 15%.
+1. Every item in missingItems, bpuMathErrors, and any unfulfilled requirement in the tender text MUST appear in your criticalTrapsFound list.
+2. If BPU Data is not found, you MUST flag it as a critical trap in Envelope C.
+3. If missingItems.length > 0 or bpuAudit.hasErrors or bpuAudit.status === 'BPU_DATA_NOT_FOUND', eliminationRiskPercent MUST be >= 15% (triggering CRITICAL_DISQUALIFICATION_WARNING).
+4. If the bidder is a Labelled Startup and the tender allows Loi 23-12 Art. 87 exemptions, confirm the exemptions and verify if risk is under 15%.
 `;
 
     let gemmaPass2Thought = '';
@@ -345,7 +267,11 @@ Rules:
     // =========================================================================
     // DETERMINISTIC TYPESCRIPT POST-LOCK (Guarantees 0% Contradiction in UI)
     // =========================================================================
-    const hasDefects = missingItems.length > 0 || bpuAudit.hasErrors;
+    const hasDefects =
+      missingItems.length > 0 ||
+      bpuAudit.hasErrors ||
+      bpuAudit.status === 'BPU_DATA_NOT_FOUND' ||
+      mergedTraps.length > 0;
 
     if (hasDefects) {
       // Force risk >= 35% (well above 15% boundary)
@@ -353,6 +279,21 @@ Rules:
       pass2Critic.status = 'CRITICAL_DISQUALIFICATION_WARNING';
       pass2Critic.isDisqualifiedWarning = true;
       pass2Critic.readyToSubmit = false;
+
+      // Handle BPU Data Not Found defect
+      if (bpuAudit.status === 'BPU_DATA_NOT_FOUND') {
+        const alreadyFlagged = mergedTraps.some((t) => t.trapId.includes('BPU-DATA-NOT-FOUND'));
+        if (!alreadyFlagged) {
+          const trap: FatalTrap = {
+            trapId: 'TRAP-BPU-DATA-NOT-FOUND',
+            severity: 'HIGH',
+            cause: 'BPU Data Not Found : Aucun tableau de bordereau des prix unitaires structuré n\'a été extrait du document pour contrôle arithmétique.',
+            legalBasis: 'Loi n° 23-12 Art. 47 & 72',
+            correctionRequired: 'Saisir ou formater les lignes du BPU pour permettre le contrôle arithmétique COPEO.',
+          };
+          mergedTraps.push(trap);
+        }
+      }
 
       // Merge every missing document into fatalTrapsIdentified and criticalTrapsFound
       for (const missing of missingItems) {

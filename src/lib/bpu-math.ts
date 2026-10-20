@@ -37,9 +37,14 @@ export function auditBpuItems(items: BpuItem[], tenderId?: string): BpuAuditSumm
       totalTva19Amount: 0,
       totalTVA: 0,
       grandTotalTTC: 0,
-      hasErrors: false,
-      criticalErrorsCount: 0,
-      errorDescriptions: [],
+      hasErrors: true,
+      criticalErrorsCount: 1,
+      errorDescriptions: [
+        'BPU Data Not Found : Aucun tableau de bordereau des prix unitaires (BPU/DQE) n\'a été extrait du document pour audit arithmétique.',
+      ],
+      status: 'BPU_DATA_NOT_FOUND',
+      notFoundMessage:
+        'BPU Data Not Found : Le document ne contient pas de tableau des prix unitaires structuré ou le format n\'a pas permis l\'extraction des lignes de prix.',
     };
   }
 
@@ -132,6 +137,7 @@ export function auditBpuItems(items: BpuItem[], tenderId?: string): BpuAuditSumm
     hasErrors: criticalErrorsCount > 0,
     criticalErrorsCount,
     errorDescriptions,
+    status: 'AUDITED',
   };
 }
 

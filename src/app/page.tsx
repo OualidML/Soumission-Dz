@@ -74,26 +74,43 @@ export default function HomePage() {
     runAudit(selectedTenderId, selectedProfileId);
   }, []);
 
-  const runAudit = async (tenderIdToUse = selectedTenderId, profileIdToUse = selectedProfileId) => {
+  const runAudit = async (
+    tenderIdToUse = selectedTenderId,
+    profileIdToUse = selectedProfileId,
+    overrideText?: string,
+    overrideFileName?: string
+  ) => {
     setIsLoading(true);
     setErrorMsg(null);
     setStepMessage('1/4 Chargement des 3 Agents Skills modulaires (SKILL.md)...');
 
     try {
-      const uploadedCustomText = customText;
-      const isCustom = inputTab === 'pdf' || isCustomMode || selectedTenderId === 'custom' || selectedTenderId === 'custom-tender' || (!!uploadedCustomText && uploadedCustomText.trim().length > 0);
-      const isCustomUpload = isCustom || selectedTenderId === 'custom' || Boolean(uploadedCustomText);
+      const activeText = overrideText !== undefined ? overrideText : customText;
+      const activeFileName = overrideFileName !== undefined ? overrideFileName : uploadedFileName;
+
+      const isCustom =
+        inputTab === 'pdf' ||
+        isCustomMode ||
+        tenderIdToUse === 'custom' ||
+        tenderIdToUse === 'custom-tender' ||
+        (!!activeText && activeText.trim().length > 0);
+
+      const isCustomUpload =
+        isCustom ||
+        tenderIdToUse === 'custom' ||
+        tenderIdToUse === 'custom-tender' ||
+        Boolean(activeText && activeText.trim().length > 0);
 
       const activeT = isCustom
         ? {
             id: 'custom-tender',
-            reference: uploadedFileName
-              ? `DOC-${uploadedFileName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}/2026`
+            reference: activeFileName
+              ? `DOC-${activeFileName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}/2026`
               : 'CUSTOM/2026/DZ',
-            title: uploadedFileName ? `Cahier des Charges — ${uploadedFileName}` : 'Cahier des charges personnalisé',
+            title: activeFileName ? `Cahier des Charges — ${activeFileName}` : 'Cahier des charges personnalisé',
             authority: 'Commission des Marchés Publics',
             sector: 'Marché Public Personnalisé',
-            RawText: uploadedCustomText || 'Cahier des charges soumis à l\'audit...',
+            RawText: activeText || 'Cahier des charges soumis à l\'audit...',
             bpuItems: [],
           }
         : tenders.find((t) => t.id === tenderIdToUse) || tenders[0];
@@ -105,14 +122,19 @@ export default function HomePage() {
       setTimeout(() => setStepMessage('3/4 Pass 1: Extraction Enveloppes Loi 23-12 & Mémoire Gemma 4...'), 800);
       setTimeout(() => setStepMessage('4/4 Pass 2: Critique Adversarial COPEO & Règle des 15%...'), 1200);
 
+      const payloadText = isCustom ? (activeText || activeT.RawText) : activeT.RawText;
+
       const res = await fetch('/api/analyze-tender', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tenderData: activeT,
+          tenderData: {
+            ...activeT,
+            RawText: payloadText,
+          },
           companyProfile: activeP,
-          rawTenderText: activeT.RawText,
-          isCustomUpload: selectedTenderId === 'custom' || Boolean(uploadedCustomText) || isCustomUpload,
+          rawTenderText: payloadText,
+          isCustomUpload: isCustomUpload,
         }),
       });
 
@@ -292,6 +314,8 @@ export default function HomePage() {
                     setCustomText(text);
                     if (fileName) setUploadedFileName(fileName);
                     setIsCustomMode(true);
+                    setInputTab('pdf');
+                    runAudit('custom', selectedProfileId, text, fileName);
                   }}
                   activeFileName={uploadedFileName}
                   onClearFile={() => {
@@ -338,7 +362,7 @@ export default function HomePage() {
             {/* PRIMARY CTA */}
             <div className="md:col-span-3">
               <button
-                onClick={() => runAudit(selectedTenderId, selectedProfileId)}
+                onClick={() => runAudit(isCustomMode ? 'custom' : selectedTenderId, selectedProfileId)}
                 disabled={isLoading}
                 className={`w-full py-2.5 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-lg ${
                   isLoading
@@ -698,7 +722,18 @@ export default function HomePage() {
                   </span>
                 </div>
 
-                {result.bpuAudit.hasErrors ? (
+                {result.bpuAudit.status === 'BPU_DATA_NOT_FOUND' || result.bpuAudit.lines.length === 0 ? (
+                  <div className="mt-3 p-2.5 rounded-lg bg-amber-950/60 border border-amber-800 text-xs text-amber-200 flex items-start space-x-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">BPU / DQE Non Extrait : </span>
+                      <span>
+                        {result.bpuAudit.notFoundMessage ||
+                          "Aucun tableau de bordereau des prix unitaires (BPU/DQE) exploitable n'a été extrait du document PDF. L'intégrité arithmétique financière ne peut pas être validée."}
+                      </span>
+                    </div>
+                  </div>
+                ) : result.bpuAudit.hasErrors ? (
                   <div className="mt-3 p-2.5 rounded-lg bg-red-950/60 border border-red-800 text-xs text-red-200 flex items-start space-x-2">
                     <AlertTriangle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
                     <div>
@@ -726,72 +761,88 @@ export default function HomePage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {result.bpuAudit.lines.map((l) => (
-                        <tr
-                          key={l.code}
-                          className={`hover:bg-slate-800/30 ${
-                            l.hasDiscrepancy ? 'bg-red-950/30 font-semibold' : ''
-                          }`}
-                        >
-                          <td className="py-2 pr-2">
-                            <span className={l.hasDiscrepancy ? 'text-red-400 font-bold' : 'text-slate-300'}>
-                              {l.code}
-                            </span>
-                            <div className="text-[10px] text-slate-400 truncate max-w-[120px]" title={l.designation}>
-                              {l.designation}
-                            </div>
-                          </td>
-                          <td className="py-2 pr-2 text-slate-300">
-                            {l.qty} x {(l.unitPriceHT / 1000).toLocaleString('fr-DZ')}k
-                          </td>
-                          <td className="py-2 pr-2 text-slate-400">
-                            {(l.claimedTotalHT / 1000).toLocaleString('fr-DZ')}k
-                          </td>
-                          <td className="py-2 pr-2">
-                            <span
-                              className={
-                                l.hasDiscrepancy ? 'text-red-400 font-black' : 'text-emerald-400'
-                              }
-                            >
-                              {(l.computedTotalHT / 1000).toLocaleString('fr-DZ')}k
-                            </span>
-                            {l.hasDiscrepancy && (
-                              <span className="block text-[9px] text-red-400">
-                                ÉCART {l.discrepancyHT < 0 ? '-' : '+'}{Math.abs(l.discrepancyHT).toLocaleString('fr-DZ')} DA
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2 text-right text-slate-300">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px]">
-                              {l.tvaRate}%
-                            </span>
+                      {result.bpuAudit.lines.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-6 text-center text-slate-400 italic">
+                            BPU Data Not Found — Aucun bordereau de prix n&apos;a été détecté dans les pages analysées.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        result.bpuAudit.lines.map((l) => (
+                          <tr
+                            key={l.code}
+                            className={`hover:bg-slate-800/30 ${
+                              l.hasDiscrepancy ? 'bg-red-950/30 font-semibold' : ''
+                            }`}
+                          >
+                            <td className="py-2 pr-2">
+                              <span className={l.hasDiscrepancy ? 'text-red-400 font-bold' : 'text-slate-300'}>
+                                {l.code}
+                              </span>
+                              <div className="text-[10px] text-slate-400 truncate max-w-[120px]" title={l.designation}>
+                                {l.designation}
+                              </div>
+                            </td>
+                            <td className="py-2 pr-2 text-slate-300">
+                              {l.qty} x {(l.unitPriceHT / 1000).toLocaleString('fr-DZ')}k
+                            </td>
+                            <td className="py-2 pr-2 text-slate-400">
+                              {(l.claimedTotalHT / 1000).toLocaleString('fr-DZ')}k
+                            </td>
+                            <td className="py-2 pr-2">
+                              <span
+                                className={
+                                  l.hasDiscrepancy ? 'text-red-400 font-black' : 'text-emerald-400'
+                                }
+                              >
+                                {(l.computedTotalHT / 1000).toLocaleString('fr-DZ')}k
+                              </span>
+                              {l.hasDiscrepancy && (
+                                <span className="block text-[9px] text-red-400">
+                                  ÉCART {l.discrepancyHT < 0 ? '-' : '+'}{Math.abs(l.discrepancyHT).toLocaleString('fr-DZ')} DA
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 text-right text-slate-300">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px]">
+                                {l.tvaRate}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
 
                 {/* TOTALS SUMMARY */}
                 <div className="mt-4 pt-3 border-t border-slate-800 space-y-1.5 text-xs font-mono">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Total HT Déclaré :</span>
-                    <span>{formatDZD(result.bpuAudit.claimedGrandTotalHT)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-200 font-bold">
-                    <span>Total HT Calculé :</span>
-                    <span className={result.bpuAudit.hasErrors ? 'text-red-400' : 'text-emerald-400'}>
-                      {formatDZD(result.bpuAudit.computedGrandTotalHT)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-slate-400 text-[11px]">
-                    <span>TVA (9% Solaire & 19% Standard) :</span>
-                    <span>{formatDZD(result.bpuAudit.totalTVA)}</span>
-                  </div>
-                  <div className="flex justify-between text-white font-black text-sm pt-1 border-t border-slate-800">
-                    <span className="text-cyan-400">Total Général TTC :</span>
-                    <span className="text-cyan-400">{formatDZD(result.bpuAudit.grandTotalTTC)}</span>
-                  </div>
+                  {result.bpuAudit.lines.length === 0 ? (
+                    <div className="py-2 text-center text-slate-400 text-xs italic">
+                      Totaux non calculables (BPU absent ou non extrait)
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-slate-400">
+                        <span>Total HT Déclaré :</span>
+                        <span>{formatDZD(result.bpuAudit.claimedGrandTotalHT)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-200 font-bold">
+                        <span>Total HT Calculé :</span>
+                        <span className={result.bpuAudit.hasErrors ? 'text-red-400' : 'text-emerald-400'}>
+                          {formatDZD(result.bpuAudit.computedGrandTotalHT)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-slate-400 text-[11px]">
+                        <span>TVA (9% Solaire & 19% Standard) :</span>
+                        <span>{formatDZD(result.bpuAudit.totalTVA)}</span>
+                      </div>
+                      <div className="flex justify-between text-white font-black text-sm pt-1 border-t border-slate-800">
+                        <span className="text-cyan-400">Total Général TTC :</span>
+                        <span className="text-cyan-400">{formatDZD(result.bpuAudit.grandTotalTTC)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </section>
             </div>

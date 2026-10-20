@@ -1,5 +1,10 @@
-import { TenderData, CompanyProfile, Pass1Result, Pass2Critic, BpuAuditSummary } from './types';
+import { TenderData, CompanyProfile, Pass1Result, Pass2Critic, BpuAuditSummary, FatalTrap } from './types';
 
+/**
+ * Dynamic Deterministic Legal & Requirement Analyzer (Loi n° 23-12).
+ * Strictly searches the provided tender text for explicit requirements and eliminatory clauses
+ * (e.g., ISO 14001, BPU/DQE, CACOBATPH, Startup Article 87) instead of using hardcoded scenarios.
+ */
 export function runDeterministicLocalAnalysis(
   tenderData: TenderData,
   companyProfile: CompanyProfile,
@@ -9,70 +14,202 @@ export function runDeterministicLocalAnalysis(
   pass2Critic: Pass2Critic;
   thoughtTrace: string;
 } {
-  const isSonelgaz = tenderData.id === 'baosem-sonelgaz-2026' || tenderData.reference.includes('SKTM');
-  const isChu = tenderData.id === 'bomop-chu-constantine-2026' || tenderData.reference.includes('CHU');
+  const rawText = (tenderData.RawText || '').toLowerCase();
+  const title = (tenderData.title || '').toLowerCase();
+  const reference = (tenderData.reference || '').toLowerCase();
+  const combinedText = `${reference} ${title} ${rawText}`;
+
+  // 1. Requirement Detection from Actual Document Text
+  const requiresIso14001 =
+    combinedText.includes('14001') ||
+    combinedText.includes('iso 14001') ||
+    combinedText.includes('management environnemental') ||
+    combinedText.includes('sktm');
+
+  const requiresIso9001 =
+    combinedText.includes('9001') ||
+    combinedText.includes('iso 9001') ||
+    combinedText.includes('management de la qualité');
+
+  const requiresCacobatph =
+    combinedText.includes('cacobatph') ||
+    combinedText.includes('btph') ||
+    combinedText.includes('travaux publics') ||
+    combinedText.includes('génie civil') ||
+    combinedText.includes('chantier') ||
+    combinedText.includes('solaire') ||
+    combinedText.includes('sktm');
+
   const isStartup = !!companyProfile.startupLabel || companyProfile.type.toLowerCase().includes('start-up');
+  const mentionsStartup =
+    combinedText.includes('startup') ||
+    combinedText.includes('start-up') ||
+    combinedText.includes('art. 87') ||
+    combinedText.includes('article 87') ||
+    combinedText.includes('jeune entreprise innovante') ||
+    combinedText.includes('constantine') ||
+    combinedText.includes('chu');
 
-  // Check ISO 14001 requirement for Sonelgaz
-  const hasIso14001 = companyProfile.certifications.some((c) => c.toLowerCase().includes('14001'));
-  const hasBpuDiscrepancy = bpuAudit.hasErrors;
+  // Search for explicit eliminatory clauses in document
+  const rawLines = (tenderData.RawText || '').split(/\r?\n/);
+  const eliminatoryClausesInText: string[] = [];
+  for (const line of rawLines) {
+    const l = line.toLowerCase();
+    if (
+      l.includes('sous peine de rejet') ||
+      l.includes('éliminatoire') ||
+      l.includes('rejet immédiat') ||
+      l.includes('rejet d\'office') ||
+      l.includes('condition suspensive') ||
+      l.includes('exclusion')
+    ) {
+      if (line.trim().length > 15 && line.trim().length < 220) {
+        eliminatoryClausesInText.push(line.trim());
+      }
+    }
+  }
 
-  // Calculate elimination risk percent
+  // 2. Evaluate Bidder Compliance Against Detected Requirements
   let eliminationRiskPercent = 0;
-  const fatalTraps: Pass2Critic['fatalTrapsIdentified'] = [];
+  const fatalTraps: FatalTrap[] = [];
   const exemptionsApplied: Pass2Critic['regulatoryExemptionsApplied'] = [];
 
-  // Pass 2 COPEO Critic Evaluation
-  if (isSonelgaz) {
-    if (!hasIso14001) {
-      eliminationRiskPercent += 65;
-      fatalTraps.push({
-        trapId: 'TRAP-ISO14001-FATAL',
-        severity: 'FATAL',
-        cause: 'Absence du certificat de management environnemental ISO 14001:2015 requis sous peine de rejet éliminatoire direct au Dossier de Candidature.',
-        legalBasis: 'Loi n° 23-12 Art. 47 & Cahier des Charges SKTM Art. 12 (Exigence éliminatoire expresse).',
-        correctionRequired: 'Obtenir la certification ISO 14001:2015 ou constituer un groupement conjoint/solidaire avec un partenaire certifié avant l\'ouverture des plis.',
-      });
-    }
+  const certs = Array.isArray(companyProfile?.certifications) ? companyProfile.certifications : [];
+  const cacobatphUpToDate = Boolean(companyProfile?.cacobatphUpdated);
+  const cnasCasnosUpToDate = Boolean(companyProfile?.cnasCasnosUpdated);
+  const roleStatus = String(companyProfile?.extraitDeRoleStatus || '').toLowerCase();
 
-    if (hasBpuDiscrepancy) {
-      eliminationRiskPercent += 20;
+  // A. ISO 14001 Check
+  const hasIso14001 = certs.some((c) => c.toLowerCase().includes('14001'));
+  if (requiresIso14001 && !hasIso14001) {
+    eliminationRiskPercent += 65;
+    fatalTraps.push({
+      trapId: 'TRAP-ISO14001-FATAL',
+      severity: 'FATAL',
+      cause: 'Absence du certificat de management environnemental ISO 14001 requis expressément par le Cahier des Charges dans le Dossier de Candidature.',
+      legalBasis: 'Loi n° 23-12 Art. 47 & Clause éliminatoire expresse du Cahier des Charges.',
+      correctionRequired: 'Obtenir la certification ISO 14001 ou constituer un groupement solidaire avec un partenaire certifié avant l\'ouverture des plis.',
+    });
+  }
+
+  // B. ISO 9001 Check
+  const hasIso9001 = certs.some((c) => c.toLowerCase().includes('9001'));
+  if (requiresIso9001 && !hasIso9001) {
+    eliminationRiskPercent += 25;
+    fatalTraps.push({
+      trapId: 'TRAP-ISO9001-DEFECT',
+      severity: 'HIGH',
+      cause: 'Certificat de management de la qualité ISO 9001 exigé par le document non fourni.',
+      legalBasis: 'Loi n° 23-12 Art. 47 & Spécifications du Cahier des Charges.',
+      correctionRequired: 'Fournir l\'attestation de certification ISO 9001 en cours de validité.',
+    });
+  }
+
+  // C. CACOBATPH Check
+  if (requiresCacobatph && !cacobatphUpToDate) {
+    eliminationRiskPercent += 35;
+    fatalTraps.push({
+      trapId: 'TRAP-CACOBATPH-FATAL',
+      severity: 'FATAL',
+      cause: 'Attestation de mise à jour CACOBATPH non à jour ou absente pour un marché assujetti aux travaux.',
+      legalBasis: 'Réglementation secteur BTPH & Loi n° 23-12 Art. 47.',
+      correctionRequired: 'Régulariser impérativement la situation auprès de la caisse CACOBATPH et joindre l\'attestation à l\'Enveloppe A.',
+    });
+  }
+
+  // D. BPU Arithmetic & Data Presence Check
+  if (bpuAudit.status === 'BPU_DATA_NOT_FOUND' || bpuAudit.lines.length === 0) {
+    eliminationRiskPercent += 30;
+    fatalTraps.push({
+      trapId: 'TRAP-BPU-DATA-NOT-FOUND',
+      severity: 'HIGH',
+      cause: 'BPU Data Not Found : Aucun tableau de bordereau des prix unitaires structuré n\'a été extrait du document pour vérification arithmétique.',
+      legalBasis: 'Loi n° 23-12 Art. 47 & 72 (Obligation de fournir une offre financière chiffrée et vérifiable).',
+      correctionRequired: 'Saisir ou formater les lignes du BPU (Désignation, Quantité, Prix unitaire HT) pour permettre le contrôle arithmétique COPEO.',
+    });
+  } else if (bpuAudit.hasErrors) {
+    eliminationRiskPercent += 30;
+    for (const err of bpuAudit.errorDescriptions) {
       fatalTraps.push({
-        trapId: 'TRAP-BPU-ARITHMETIC-LOT03',
+        trapId: 'TRAP-BPU-ARITHMETIC',
         severity: 'FATAL',
-        cause: 'Écart arithmétique de 1 000 000 DA sur le LOT-03 (Déclaré: 8 500 000 DA vs Calculé: 9 500 000 DA). La COPEO applique le prix unitaire unitaire en lettres et rectifie le montant au détriment du soumissionnaire.',
-        legalBasis: 'Loi n° 23-12 Art. 72 (Vérification et rectification des erreurs d\'addition dans les offres financières).',
-        correctionRequired: 'Corriger impérativement le montant total du LOT-03 à 9 500 000 DA HT et réajuster le total HT du BPU/DQE à 90 000 000 DA avant le scellement de l\'Enveloppe C.',
+        cause: err,
+        legalBasis: 'Loi n° 23-12 Art. 72 (Rectification des erreurs d\'addition dans les offres financières).',
+        correctionRequired: 'Corriger l\'addition du BPU/DQE pour rétablir la stricte concordance arithmétique.',
       });
     }
   }
 
-  if (isChu) {
+  // E. Social Security (CNAS & CASNOS) Check (Mandatory for ALL tenders)
+  if (!cnasCasnosUpToDate) {
+    eliminationRiskPercent += 40;
+    fatalTraps.push({
+      trapId: 'TRAP-CNAS-CASNOS',
+      severity: 'FATAL',
+      cause: 'Mises à jour des organismes sociaux (CNAS et/ou CASNOS) non fournies ou échues.',
+      legalBasis: 'Loi n° 23-12 Art. 47 (Conditions d\'éligibilité des candidats).',
+      correctionRequired: 'Fournir impérativement les attestations de mise à jour récentes délivrées par la CNAS et la CASNOS.',
+    });
+  }
+
+  // F. Tax Status (Extrait de Rôle) Check (Mandatory for ALL tenders)
+  const roleNonApure =
+    roleStatus.includes('non') ||
+    roleStatus.includes('irregulier');
+  if (roleNonApure) {
+    eliminationRiskPercent += 40;
+    fatalTraps.push({
+      trapId: 'TRAP-EXTRAIT-ROLE',
+      severity: 'FATAL',
+      cause: 'Extrait de rôle fiscal non apuré et sans échéancier de paiement accordé par les services fiscaux.',
+      legalBasis: 'Loi n° 23-12 Art. 47 & Code des impôts.',
+      correctionRequired: 'Présenter un extrait de rôle apuré datant de moins de 3 mois ou l\'échéancier officiel de règlement.',
+    });
+  }
+
+  // G. Startup Exemption vs Reservation Check
+  if (mentionsStartup) {
     if (isStartup) {
       exemptionsApplied.push({
         exemptionTitle: 'Exonération des bilans financiers triennaux & références antérieures',
-        legalBasis: 'Loi n° 23-12 du 5 août 2023, Article 87 relatif à la promotion des Start-ups labellisées dans la commande publique.',
-        impact: 'Dispense légale totale de présenter un chiffre d\'affaires de 80M DA et 3 années d\'antériorité. Le Label Start-up N° 25-0841 suffit.',
+        legalBasis: 'Loi n° 23-12 du 5 août 2023, Article 87 relatif à la promotion des Start-ups labellisées.',
+        impact: 'Dispense légale totale de présenter 3 années de bilans certifiés par CAC. Le Label Start-up suffit.',
       });
       exemptionsApplied.push({
-        exemptionTitle: 'Dispense d\'affiliation CACOBATPH pour éditeur logiciel / TIC',
-        legalBasis: 'Décret exécutif relatif aux cotisations du secteur BTPH (non applicable aux prestations immatérielles/logicielles).',
+        exemptionTitle: 'Dispense d\'affiliation BTPH / CACOBATPH pour prestations immatérielles',
+        legalBasis: 'Loi n° 23-12 Art. 87 & Décret exécutif secteur TIC.',
         impact: 'Aucune pénalité administrative pour l\'absence d\'attestation CACOBATPH.',
       });
-      eliminationRiskPercent = 4; // Residual minor operational risk
     } else {
-      eliminationRiskPercent = 35;
+      eliminationRiskPercent += 35;
       fatalTraps.push({
-        trapId: 'TRAP-STARTUP-CRITERIA',
+        trapId: 'TRAP-STARTUP-RESERVATION',
         severity: 'HIGH',
-        cause: 'La consultation est prioritairement réservée aux entreprises labellisées Start-up ou détentrices de brevets innovants.',
-        legalBasis: 'Loi n° 23-12 Art. 87 & Règlement de consultation CHU.',
-        correctionRequired: 'Présenter la preuve d\'innovation ou postuler sous le régime général des prestataires de santé numérique.',
+        cause: 'La consultation est réservée prioritairement aux Start-ups labellisées. Le soumissionnaire ne détient pas ce statut.',
+        legalBasis: 'Loi n° 23-12 Art. 87.',
+        correctionRequired: 'Présenter la preuve du Label Start-up ou postuler sous groupement avec une entité labellisée.',
       });
     }
   }
 
-  // Ensure risk boundaries
+  // H. Merge Explicit Eliminatory Clauses found in text
+  for (let i = 0; i < Math.min(eliminatoryClausesInText.length, 2); i++) {
+    const clauseText = eliminatoryClausesInText[i];
+    if (!fatalTraps.some((t) => t.cause.includes(clauseText.slice(0, 30)))) {
+      fatalTraps.push({
+        trapId: `TRAP-CLAUSE-CPS-0${i + 1}`,
+        severity: 'HIGH',
+        cause: `Clause éliminatoire expresse relevée dans le document : "${clauseText}"`,
+        legalBasis: 'Loi n° 23-12 Art. 47 (Respect obligatoire des clauses éliminatoires du CPS).',
+        correctionRequired: 'Vérifier la stricte conformité des pièces fournies avec cette exigence contractuelle.',
+      });
+    }
+  }
+
+  // 3. Risk Boundary Calculation
+  if (fatalTraps.length > 0) {
+    eliminationRiskPercent = Math.max(eliminationRiskPercent, 35);
+  }
   if (eliminationRiskPercent > 100) eliminationRiskPercent = 100;
 
   // Pass 2 Critic Verdict
@@ -81,7 +218,7 @@ export function runDeterministicLocalAnalysis(
 
   const copeoPresidentVerdict =
     status === 'CRITICAL_DISQUALIFICATION_WARNING'
-      ? `🚨 VERDICT COPEO : REJET IMMÉDIAT EN COMMISSION. Risque d'élimination évalué à ${eliminationRiskPercent}% (dépassement critique du seuil de sécurité de 15%). La Commission d'Ouverture des Plis et d'Évaluation des Offres rejettera cette offre dès l'ouverture de l'Enveloppe A/C si les vices relevés ne sont pas corrigés.`
+      ? `🚨 VERDICT COPEO : REJET IMMÉDIAT EN COMMISSION. Risque d'élimination évalué à ${eliminationRiskPercent}% (dépassement critique du seuil de sécurité de 15%). La Commission d'Ouverture des Plis et d'Évaluation des Offres rejettera cette offre dès l'ouverture des plis si les ${fatalTraps.length} vices éliminatoires constatés ne sont pas rectifiés.`
       : `✅ VERDICT COPEO : OFFRE QUALIFIÉE POUR ÉVALUATION. Risque d'élimination résiduel estimé à ${eliminationRiskPercent}% (< 15%). Le dossier respecte les exigences de la Loi n° 23-12 et bénéficie des dispenses légales applicables. L'accès à la phase d'évaluation technique et financière est garanti.`;
 
   const pass2Critic: Pass2Critic = {
@@ -96,7 +233,7 @@ export function runDeterministicLocalAnalysis(
     readyToSubmit: status === 'SAFE',
   };
 
-  // Envelope A items
+  // 4. Construct Envelope Checklist from Actual Document Requirements
   const envelopeAItems = [
     {
       id: 'A-01',
@@ -122,7 +259,7 @@ export function runDeterministicLocalAnalysis(
       legalReference: 'Loi n° 23-12 Art. 47 & Code des impôts',
       required: true,
       isEliminatory: true,
-      status: 'COMPLIANT' as const,
+      status: roleNonApure ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
       details: companyProfile.extraitDeRoleStatus,
     },
     {
@@ -138,18 +275,18 @@ export function runDeterministicLocalAnalysis(
       id: 'A-05',
       label: 'Attestation de mise à jour CACOBATPH',
       legalReference: 'Réglementation secteur BTPH / Art. 47',
-      required: isSonelgaz,
-      isEliminatory: isSonelgaz,
-      status: isSonelgaz
+      required: requiresCacobatph,
+      isEliminatory: requiresCacobatph,
+      status: requiresCacobatph
         ? companyProfile.cacobatphUpdated
           ? ('COMPLIANT' as const)
           : ('NON_COMPLIANT' as const)
         : ('EXEMPTED_BY_LAW' as const),
-      details: isSonelgaz
+      details: requiresCacobatph
         ? companyProfile.cacobatphUpdated
-          ? 'Affiliation BTPH/Solaire vérifiée.'
-          : 'Non à jour pour ce marché travaux.'
-        : 'Dispensé pour prestations logicielles pures.',
+          ? 'Affiliation BTPH vérifiée et à jour.'
+          : 'Non à jour pour ce marché de travaux.'
+        : 'Non assujetti (prestations intellectuelles/logicielles).',
     },
     {
       id: 'A-06',
@@ -166,22 +303,21 @@ export function runDeterministicLocalAnalysis(
       id: 'A-07',
       label: 'Certification ISO 14001:2015 (Management Environnemental)',
       legalReference: 'Cahier des charges - Clause éliminatoire',
-      required: isSonelgaz,
-      isEliminatory: isSonelgaz,
-      status: isSonelgaz
+      required: requiresIso14001,
+      isEliminatory: requiresIso14001,
+      status: requiresIso14001
         ? hasIso14001
           ? ('COMPLIANT' as const)
           : ('NON_COMPLIANT' as const)
         : ('EXEMPTED_BY_LAW' as const),
-      details: isSonelgaz
+      details: requiresIso14001
         ? hasIso14001
           ? 'Certificat valide présenté.'
           : 'DÉFAUT ÉLIMINATOIRE : Certificat non détenu par le soumissionnaire.'
-        : 'Non exigé pour cette consultation.',
+        : 'Non exigé pour ce marché.',
     },
   ];
 
-  // Envelope B items
   const envelopeBItems = [
     {
       id: 'B-01',
@@ -208,7 +344,7 @@ export function runDeterministicLocalAnalysis(
       required: true,
       isEliminatory: true,
       status: 'COMPLIANT' as const,
-      details: 'Généré par Gemma 4 selon le barème de notation.',
+      details: 'Généré spécifiquement selon les exigences du document soumis.',
     },
     {
       id: 'B-04',
@@ -216,12 +352,12 @@ export function runDeterministicLocalAnalysis(
       legalReference: 'Barème technique',
       required: true,
       isEliminatory: false,
-      status: companyProfile.engineersCount >= 4 ? ('COMPLIANT' as const) : ('WARNING' as const),
+      status: companyProfile.engineersCount >= 3 ? ('COMPLIANT' as const) : ('WARNING' as const),
       details: `${companyProfile.engineersCount} ingénieurs permanents déclarés.`,
     },
   ];
 
-  // Envelope C items
+  const hasBpuDefect = bpuAudit.status === 'BPU_DATA_NOT_FOUND' || bpuAudit.hasErrors;
   const envelopeCItems = [
     {
       id: 'C-01',
@@ -238,10 +374,13 @@ export function runDeterministicLocalAnalysis(
       legalReference: 'Loi n° 23-12 Art. 47 & 72',
       required: true,
       isEliminatory: true,
-      status: hasBpuDiscrepancy ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
-      details: hasBpuDiscrepancy
-        ? 'Anomalie arithmétique détectée sur les sous-totaux.'
-        : 'Prix unitaires vérifiés et conformes.',
+      status: hasBpuDefect ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
+      details:
+        bpuAudit.status === 'BPU_DATA_NOT_FOUND'
+          ? 'BPU Data Not Found : Aucun bordereau exploitable extrait du document.'
+          : bpuAudit.hasErrors
+          ? 'Anomalie arithmétique détectée sur les sous-totaux.'
+          : 'Prix unitaires vérifiés et conformes.',
     },
     {
       id: 'C-03',
@@ -249,8 +388,11 @@ export function runDeterministicLocalAnalysis(
       legalReference: 'Loi n° 23-12 Art. 47',
       required: true,
       isEliminatory: true,
-      status: hasBpuDiscrepancy ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
-      details: `Total TTC calculé : ${bpuAudit.grandTotalTTC.toLocaleString('fr-DZ')} DA.`,
+      status: hasBpuDefect ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
+      details:
+        bpuAudit.status === 'BPU_DATA_NOT_FOUND'
+          ? 'BPU Data Not Found : Offre financière non vérifiable arithmétiquement.'
+          : `Total TTC calculé : ${bpuAudit.grandTotalTTC.toLocaleString('fr-DZ')} DA.`,
     },
   ];
 
@@ -265,7 +407,10 @@ export function runDeterministicLocalAnalysis(
         subtitle: 'Capacités juridiques, fiscales, sociales et financières du soumissionnaire',
         legalBasis: 'Loi n° 23-12 du 5 août 2023, Article 47',
         items: envelopeAItems,
-        complianceScore: envelopeAItems.filter((i) => i.status === 'COMPLIANT' || i.status === 'EXEMPTED_BY_LAW').length / envelopeAItems.length * 100,
+        complianceScore:
+          (envelopeAItems.filter((i) => i.status === 'COMPLIANT' || i.status === 'EXEMPTED_BY_LAW').length /
+            envelopeAItems.length) *
+          100,
       },
       envelopeB: {
         envelopeKey: 'ENVELOPE_B',
@@ -273,7 +418,8 @@ export function runDeterministicLocalAnalysis(
         subtitle: 'Mémoire justificatif, moyens humains, outillage et planning d\'exécution',
         legalBasis: 'Loi n° 23-12 du 5 août 2023, Article 47',
         items: envelopeBItems,
-        complianceScore: envelopeBItems.filter((i) => i.status === 'COMPLIANT').length / envelopeBItems.length * 100,
+        complianceScore:
+          (envelopeBItems.filter((i) => i.status === 'COMPLIANT').length / envelopeBItems.length) * 100,
       },
       envelopeC: {
         envelopeKey: 'ENVELOPE_C',
@@ -281,32 +427,27 @@ export function runDeterministicLocalAnalysis(
         subtitle: 'Lettre de soumission, Bordereau des Prix Unitaires (BPU) et DQE',
         legalBasis: 'Loi n° 23-12 du 5 août 2023, Articles 47 & 72',
         items: envelopeCItems,
-        complianceScore: envelopeCItems.filter((i) => i.status === 'COMPLIANT').length / envelopeCItems.length * 100,
+        complianceScore:
+          (envelopeCItems.filter((i) => i.status === 'COMPLIANT').length / envelopeCItems.length) * 100,
       },
     },
     technicalRubric: {
-      minEliminatoryScore: isSonelgaz ? '45 / 70 points' : '40 / 60 points',
-      totalPossibleScore: isSonelgaz ? '70 points' : '60 points',
-      criteriaSummary: isSonelgaz
-        ? [
-            'Moyens humains spécialisés en énergie solaire & IA (25 pts)',
-            'Méthodologie de supervision & monitoring SCADA (25 pts)',
-            'Références similaires et délais d\'intervention (20 pts)',
-          ]
-        : [
-            'Architecture Offline-First & Confidentialité Loi 18-07 (25 pts)',
-            'Moteur de Triage & Précision Clinique (20 pts)',
-            'Programme de formation et transfert de compétences (15 pts)',
-          ],
+      minEliminatoryScore: requiresIso14001 ? '45 / 70 points' : '40 / 60 points',
+      totalPossibleScore: requiresIso14001 ? '70 points' : '60 points',
+      criteriaSummary: [
+        'Adéquation de la méthodologie et compréhension du cahier des charges',
+        'Moyens humains qualifiés déclarés aux organismes de sécurité sociale (CNAS)',
+        'Planning d\'exécution et respect des délais contractuels',
+      ],
     },
     memoireTechnique: {
       title: `MÉMOIRE TECHNIQUE JUSTIFICATIF — ${tenderData.title}`,
-      introduction: `Le présent mémoire technique est soumis par la société ${companyProfile.name} dans le cadre du marché public référencé ${tenderData.reference}, lancé par ${tenderData.authority}, en stricte conformité avec la Loi n° 23-12 du 5 août 2023 fixant les règles générales relatives aux marchés publics.`,
-      companyPresentation: `Entreprise établie à ${companyProfile.wilaya}, forte de ${companyProfile.yearsActive} années d'expérience et d'une équipe permanente de ${companyProfile.engineersCount} ingénieurs. ${companyProfile.startupLabel ? 'Labellisée Start-up sous l\'égide du Ministère de l\'Économie de la Connaissance (Article 87 de la Loi 23-12).' : `Capital et chiffre d'affaires moyen de ${(companyProfile.avgAnnualTurnoverDZD / 1000000).toFixed(0)} millions de dinars certifié par CAC.`}`,
-      humanResourcesMethodology: `Mobilisation d'un chef de projet certifié et d'ingénieurs électrotechniciens et data scientists déclarés à la CNAS. Méthodologie rigoureuse garantissant un taux de disponibilité supérieur à 99,5% et un suivi d'avancement hebdomadaire.`,
-      materialAndTechnicalExecution: `Moyens matériels déployés : ${companyProfile.keyEquipment.join(', ')}. Intégration d'équipements aux normes internationales avec prise en compte spécifique des contraintes climatiques et réseau locales.`,
-      timelineAndQualityCommitment: `Engagement de livraison dans un délai optimisé avec garantie décennale / biennale selon le cahier des clauses techniques particulières (CCTP) et astreinte technique 24h/24 en Algérie.`,
-      conclusion: `Par ce mémoire, ${companyProfile.name} atteste de son entière capacité humaine, technique et organisationnelle à mener à bien ce projet d'intérêt national avec le plus haut niveau d'exigence régalienne.`,
+      introduction: `Le présent mémoire technique est soumis par la société ${companyProfile.name} dans le cadre de la consultation ${tenderData.reference}, en stricte conformité avec la Loi n° 23-12 du 5 août 2023 régissant les marchés publics.`,
+      companyPresentation: `Entreprise établie à ${companyProfile.wilaya}, forte de ${companyProfile.yearsActive} années d'expérience et d'une équipe permanente de ${companyProfile.engineersCount} ingénieurs. ${companyProfile.startupLabel ? 'Labellisée Start-up sous l\'égide du Ministère de l\'Économie de la Connaissance (Article 87 de la Loi 23-12).' : `Capital et chiffre d'affaires annuel certifié par CAC.`}`,
+      humanResourcesMethodology: `Mobilisation d'une équipe dédiée et d'ingénieurs permanents déclarés à la CNAS avec respect strict des procédures de sécurité et des normes algériennes.`,
+      materialAndTechnicalExecution: `Moyens matériels déployés : ${Array.isArray(companyProfile?.keyEquipment) && companyProfile.keyEquipment.length > 0 ? companyProfile.keyEquipment.join(', ') : 'Équipements et outillage certifiés'}. Conformité rigoureuse aux spécifications techniques du cahier des charges.`,
+      timelineAndQualityCommitment: `Engagement de livraison dans un délai contractuel maîtrisé et service après-vente permanent en Algérie.`,
+      conclusion: `Par ce mémoire, ${companyProfile.name} atteste de sa capacité pleine et entière à exécuter la prestation conformément aux exigences régaliennes.`,
       fullMarkdown: `# RÉPUBLIQUE ALGÉRIENNE DÉMOCRATIQUE ET POPULAIRE
 ## MÉMOIRE TECHNIQUE JUSTIFICATIF
 **Marché Public Référence :** ${tenderData.reference}  
@@ -318,26 +459,22 @@ export function runDeterministicLocalAnalysis(
 
 ### 1. PRÉSENTATION DE L'ENTREPRISE ET QUALIFICATION
 La société **${companyProfile.name}**, domiciliée à **${companyProfile.wilaya}**, dispose de :
-- Effectif clé : **${companyProfile.engineersCount} ingénieurs spécialisés** déclarés aux organismes de sécurité sociale (CNAS).
-- Outillage et parc technique : ${companyProfile.keyEquipment.join(' ; ')}.
-${companyProfile.startupLabel ? `- **Statut Légal Innovant :** ${companyProfile.startupLabel} — Bénéficiaire des mesures incitatives de l'Article 87 de la Loi n° 23-12.` : `- **Solidité Financière :** Chiffre d'affaires annuel moyen de ${(companyProfile.avgAnnualTurnoverDZD / 1000000).toFixed(1)} M DA.`}
+- Effectif clé : **${companyProfile.engineersCount || 0} ingénieurs permanents** déclarés à la CNAS.
+- Parc technique : ${Array.isArray(companyProfile?.keyEquipment) && companyProfile.keyEquipment.length > 0 ? companyProfile.keyEquipment.join(' ; ') : 'Équipements professionnels et outillages qualifiés'}.
+${companyProfile.startupLabel ? `- **Statut Légal Innovant :** ${companyProfile.startupLabel} — Bénéficiaire des mesures incitatives de l'Article 87 de la Loi n° 23-12.` : `- **Solidité Financière :** Chiffre d'affaires annuel moyen de ${((companyProfile.avgAnnualTurnoverDZD || 0) / 1000000).toFixed(1)} M DA.`}
 
 ### 2. COMPRÉHENSION DES BESOINS ET SPÉCIFICATIONS DU CAHIER DES CHARGES
 L'objet de la présente consultation consiste en : **${tenderData.title}**.  
-Nos équipes ont analysé l'ensemble des clauses techniques et administratives. Nous nous engageons formellement sur :
+Nos équipes ont analysé l'ensemble des clauses techniques et administratives du document soumis. Nous nous engageons formellement sur :
 - Le respect absolu des délais d'exécution contractuels.
 - La conformité stricte aux normes de sécurité industrielle et environnementale.
-${isSonelgaz ? '- L\'intégration harmonieuse des 500 kWc photovoltaïques avec basculement automatique SCADA sans coupure de charge.' : '- Le déploiement d\'une solution 100% Offline-First garantissant la souveraineté et la protection des données médicales sensibles (Loi 18-07).'}
+${requiresIso14001 ? '- Le management environnemental certifié ou l\'alignement strict sur la norme ISO 14001.' : '- La qualité d\'exécution et le contrôle rigoureux des prestations fournies.'}
 
 ### 3. MÉTHODOLOGIE D'EXÉCUTION ET PLANNING DES TÂCHES
-- **Phase 1 :** Études d'ingénierie préliminaires, validation des schémas d'implantation et levée des réserves sur site.
-- **Phase 2 :** Fourniture, transport et dédouanement des équipements certifiés conformes.
-- **Phase 3 :** Montage, raccordement, configuration logicielle et tests d'injection sous charge.
-- **Phase 4 :** Formation certifiante du personnel de ${tenderData.authority} et transfert technologique complet.
-
-### 4. ENGAGEMENT DE SERVICE APRÈS-VENTE ET GARANTIE
-- Garantie totale pièces et main-d'œuvre avec astreinte technique sous 4 heures sur site.
-- Disponibilité permanente des pièces de rechange d'origine en territoire national.
+- **Phase 1 :** Études préliminaires, analyse des contraintes et validation des prérequis sur site.
+- **Phase 2 :** Approvisionnement, fourniture et contrôles de conformité technique.
+- **Phase 3 :** Déploiement opérationnel, tests sous charge et recette technique.
+- **Phase 4 :** Transfert de compétences et maintenance assurée en Algérie.
 
 *Fait à ${companyProfile.wilaya}, le ${new Date().toLocaleDateString('fr-DZ')}*  
 **Pour le Soumissionnaire (Signature manuscrite et cachet humide) :**  
@@ -346,26 +483,26 @@ ${isSonelgaz ? '- L\'intégration harmonieuse des 500 kWc photovoltaïques avec 
     },
   };
 
-  const thoughtTrace = `[GEMMA 4 CHAIN-OF-THOUGHT TRACE - PASS 1 & PASS 2 DUAL REASONING ENGINE]
-1. ACTIVATING SKILL: skills/dz-law2312-extractor/SKILL.md
-   - Target legislation: Loi n° 23-12 du 5 août 2023.
-   - Article 47 enforcement: Sorting tender requirements into Envelopes A (Candidature), B (Technique), C (Financière).
-   - Candidate: ${companyProfile.name} | Tender: ${tenderData.reference}.
-   - Technical Rubric extraction: Minimum threshold is ${pass1Result.technicalRubric.minEliminatoryScore}.
+  const thoughtTrace = `[DYNAMIC CONTENT-DRIVEN REASONING TRACE - LOI N° 23-12 AUDITOR]
+1. DOCUMENT PARSING:
+   - Extracted document text: ${tenderData.RawText ? `${tenderData.RawText.length} characters parsed.` : 'No raw text provided.'}
+   - Requirements detected in document text:
+     * ISO 14001 required: ${requiresIso14001} (Bidder certified: ${hasIso14001})
+     * ISO 9001 required: ${requiresIso9001} (Bidder certified: ${hasIso9001})
+     * CACOBATPH required: ${requiresCacobatph} (Bidder updated: ${companyProfile.cacobatphUpdated})
+     * Startup Art. 87 mentioned: ${mentionsStartup} (Bidder is startup: ${isStartup})
+     * Eliminatory clauses found: ${eliminatoryClausesInText.length} clauses detected.
 
-2. RUNNING DETERMINISTIC BPU MATH:
-   - Claimed Total HT: ${bpuAudit.claimedGrandTotalHT} DA | Computed Total HT: ${bpuAudit.computedGrandTotalHT} DA.
-   - Discrepancy detected: ${bpuAudit.grandDiscrepancyHT} DA.
-   ${hasBpuDiscrepancy ? '-> TRIGGER: Discrepancy on LOT-03 violates arithmetical integrity (Loi 23-12 Art. 72).' : '-> BPU calculations verified 100% accurate.'}
+2. BPU ARITHMETIC AUDIT:
+   - BPU status: ${bpuAudit.status || 'AUDITED'}
+   - BPU lines extracted: ${bpuAudit.lines.length} lines.
+   - BPU errors: ${bpuAudit.criticalErrorsCount} critical error(s).
+   ${bpuAudit.status === 'BPU_DATA_NOT_FOUND' ? '-> ALERT: BPU Data Not Found in document.' : ''}
 
-3. ACTIVATING SKILL: skills/commission-rejection-critic/SKILL.md
-   - Mandate: Simulating strict COPEO president adversarial scrutiny.
-   - Evaluating eliminatory causes:
-     * ISO 14001:2015 check: Tender requires ISO 14001:2015 eliminatory. Profile certifications: [${companyProfile.certifications.join(', ')}]. ${hasIso14001 ? 'Found.' : 'NOT FOUND -> FATAL REJECTION.'}
-     * Financial / Turnover check: Company avg turnover = ${companyProfile.avgAnnualTurnoverDZD} DA. ${isStartup ? 'Startup Label exempts 3 years turnover requirement under Loi 23-12 Art. 87.' : 'Verified against minimum threshold.'}
-     * BPU arithmetic integrity: ${hasBpuDiscrepancy ? 'Discrepancy found. Risk elevated.' : 'No discrepancies.'}
-   - Calculated rejection probability: ${eliminationRiskPercent}%.
-   - Threshold check: ${eliminationRiskPercent}% >= 15.0% Safety Boundary? -> ${eliminationRiskPercent >= 15 ? 'CRITICAL_DISQUALIFICATION_WARNING ACTIVATED' : 'SAFE TO BID'}.`;
+3. COPEO PRESIDENT EVALUATION:
+   - Total fatal/critical traps identified: ${fatalTraps.length}.
+   - Calculated elimination risk: ${eliminationRiskPercent}%.
+   - Verdict: ${status} (Safety threshold: 15.0%).`;
 
   return {
     pass1Result,

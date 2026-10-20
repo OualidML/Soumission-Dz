@@ -40,6 +40,8 @@ export interface BpuAuditSummary {
   hasErrors: boolean;
   criticalErrorsCount: number;
   errorDescriptions: string[];
+  status?: 'AUDITED' | 'BPU_DATA_NOT_FOUND';
+  notFoundMessage?: string;
 }
 
 export interface CompanyProfile {
