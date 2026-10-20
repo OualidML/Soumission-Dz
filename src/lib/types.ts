@@ -114,19 +114,25 @@ export interface Pass1Result {
     conclusion: string;
     fullMarkdown: string;
   };
+  extractedBpuItems?: BpuItem[];
+  eliminatoryClauses?: string[];
+}
+
+export interface FatalTrap {
+  trapId: string;
+  severity: 'FATAL' | 'HIGH' | 'MEDIUM';
+  cause: string;
+  legalBasis: string;
+  correctionRequired: string;
 }
 
 export interface Pass2Critic {
   status: 'SAFE' | 'WARNING' | 'CRITICAL_DISQUALIFICATION_WARNING';
+  isDisqualifiedWarning: boolean;
   eliminationRiskPercent: number; // 0 - 100
   safetyThreshold: number; // 15%
-  fatalTrapsIdentified: {
-    trapId: string;
-    severity: 'FATAL' | 'HIGH' | 'MEDIUM';
-    cause: string;
-    legalBasis: string;
-    correctionRequired: string;
-  }[];
+  fatalTrapsIdentified: FatalTrap[];
+  criticalTrapsFound: FatalTrap[];
   regulatoryExemptionsApplied: {
     exemptionTitle: string;
     legalBasis: string;

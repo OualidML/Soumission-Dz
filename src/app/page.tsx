@@ -29,6 +29,7 @@ import {
 import demoData from '../../demo-data/algerian-tenders.json';
 import { TenderData, CompanyProfile, AnalysisResponse, EnvelopeKey } from '@/lib/types';
 import { formatDZD } from '@/lib/bpu-math';
+import { DocumentUploader } from '@/components/DocumentUploader';
 
 export default function HomePage() {
   const tenders: TenderData[] = demoData.sampleTenders as any;
@@ -39,6 +40,8 @@ export default function HomePage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string>(profiles[0].id);
   const [customText, setCustomText] = useState<string>('');
   const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [inputTab, setInputTab] = useState<'sample' | 'pdf'>('sample');
 
   // Analysis result & loading state
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -77,14 +80,17 @@ export default function HomePage() {
     setStepMessage('1/4 Chargement des 3 Agents Skills modulaires (SKILL.md)...');
 
     try {
-      const activeT = isCustomMode
+      const isCustom = inputTab === 'pdf' || isCustomMode || (!!customText && customText.trim().length > 10);
+      const activeT = isCustom
         ? {
             id: 'custom-tender',
-            reference: 'CUSTOM/2026/DZ',
-            title: 'Cahier des charges personnalisé',
-            authority: 'Maître d\'Ouvrage Personnalisé',
-            sector: 'Général',
-            RawText: customText,
+            reference: uploadedFileName
+              ? `DOC-${uploadedFileName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}/2026`
+              : 'CUSTOM/2026/DZ',
+            title: uploadedFileName ? `Cahier des Charges — ${uploadedFileName}` : 'Cahier des charges personnalisé',
+            authority: 'Commission des Marchés Publics',
+            sector: 'Marché Public Personnalisé',
+            RawText: customText || 'Cahier des charges soumis à l\'audit...',
             bpuItems: [],
           }
         : tenders.find((t) => t.id === tenderIdToUse) || tenders[0];
@@ -136,6 +142,9 @@ export default function HomePage() {
   // Quick preset triggers
   const setPresetSonelgazAderfp = () => {
     setIsCustomMode(false);
+    setInputTab('sample');
+    setUploadedFileName(null);
+    setCustomText('');
     setSelectedTenderId('baosem-sonelgaz-2026');
     setSelectedProfileId('enterprise-solar-dz');
     runAudit('baosem-sonelgaz-2026', 'enterprise-solar-dz');
@@ -143,6 +152,9 @@ export default function HomePage() {
 
   const setPresetChuSolvetech = () => {
     setIsCustomMode(false);
+    setInputTab('sample');
+    setUploadedFileName(null);
+    setCustomText('');
     setSelectedTenderId('bomop-chu-constantine-2026');
     setSelectedProfileId('startup-ai-constantine');
     runAudit('bomop-chu-constantine-2026', 'startup-ai-constantine');
@@ -226,32 +238,61 @@ export default function HomePage() {
         {/* CONTROL BAR */}
         <section className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur shadow-xl">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-            {/* SELECTOR 1: TENDER */}
+            {/* SELECTOR 1: TENDER & DOCUMENT UPLOADER */}
             <div className="md:col-span-5 space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center justify-between">
-                <span className="flex items-center space-x-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
                   <FileText className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>1. Cahier des Charges Algérien (CPS / BOMOP / BAOSEM)</span>
+                  <span>1. Cahier des Charges Algérien</span>
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setIsCustomMode(!isCustomMode)}
-                  className="text-[11px] text-cyan-400 hover:text-cyan-300 underline lowercase font-normal"
-                >
-                  {isCustomMode ? 'Choisir un modèle' : 'Saisir texte libre'}
-                </button>
-              </label>
-
-              {isCustomMode ? (
-                <div className="space-y-1">
-                  <textarea
-                    rows={2}
-                    value={customText}
-                    onChange={(e) => setCustomText(e.target.value)}
-                    placeholder="Collez ici les clauses de votre cahier des charges (BOMOP/BAOSEM)..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
-                  />
+                <div className="flex items-center space-x-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInputTab('sample');
+                      setIsCustomMode(false);
+                    }}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      inputTab === 'sample' && !isCustomMode
+                        ? 'bg-cyan-950 text-cyan-300 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Modèles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInputTab('pdf');
+                      setIsCustomMode(true);
+                    }}
+                    className={`px-2 py-0.5 rounded transition-colors ${
+                      inputTab === 'pdf' || isCustomMode
+                        ? 'bg-cyan-950 text-cyan-300 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Importer PDF/TXT
+                  </button>
                 </div>
+              </div>
+
+              {inputTab === 'pdf' || isCustomMode ? (
+                <DocumentUploader
+                  extractedText={customText}
+                  onTextExtracted={(text, fileName) => {
+                    setCustomText(text);
+                    if (fileName) setUploadedFileName(fileName);
+                    setIsCustomMode(true);
+                  }}
+                  activeFileName={uploadedFileName}
+                  onClearFile={() => {
+                    setUploadedFileName(null);
+                    setCustomText('');
+                    setIsCustomMode(false);
+                    setInputTab('sample');
+                  }}
+                />
               ) : (
                 <select
                   value={selectedTenderId}

@@ -86,9 +86,11 @@ export function runDeterministicLocalAnalysis(
 
   const pass2Critic: Pass2Critic = {
     status,
+    isDisqualifiedWarning: status === 'CRITICAL_DISQUALIFICATION_WARNING',
     eliminationRiskPercent,
     safetyThreshold: 15,
     fatalTrapsIdentified: fatalTraps,
+    criticalTrapsFound: fatalTraps,
     regulatoryExemptionsApplied: exemptionsApplied,
     copeoPresidentVerdict,
     readyToSubmit: status === 'SAFE',

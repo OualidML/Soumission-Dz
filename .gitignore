@@ -8,6 +8,7 @@ node_modules/
 .env.*.local
 .env
 
+
 # Next.js build output
 .next/
 out/

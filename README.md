@@ -86,6 +86,10 @@ Pour garantir une disponibilité de 100% lors des démonstrations et en conditio
 2. **Niveau 2 (Cloud Failover)** : OpenRouter API (`OPENROUTER_API_KEY`) avec le modèle Gemma 4.
 3. **Niveau 3 (Local Deterministic Fallback)** : Moteur d'analyse local expert sous Loi n° 23-12 s'exécutant instantanément sans jamais planter l'interface.
 
+### 3. Pipeline Séquentiel Zéro-Contradiction & Téléversement PDF en Direct
+- **Extraction PDF 100% Client-Side** ([`src/components/DocumentUploader.tsx`](./src/components/DocumentUploader.tsx)) : Utilise dynamiquement `pdf.js` côté navigateur avec décodeur de secours en flux binaire. Zéro dépendance serveur lourde (`canvas`/`pdf-parse`) et zéro envoi de binaires bruts vers les LLMs.
+- **Verrou Anti-Contradiction Pass 1 ➜ Math ➜ Pass 2** : Les pièces manquantes issues de l'Enveloppe A/B/C (Pass 1) et les anomalies arithmétiques du BPU (Étape 2) sont injectées directement dans le contexte du critique COPEO (Pass 2). Un post-verrou déterministe en TypeScript garantit 0% de contradiction entre tous les panneaux de l'interface.
+
 ---
 
 ## 🛠️ Best Open-Source AI Project: Le Standard `SKILL.md`
