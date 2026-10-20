@@ -131,8 +131,8 @@ L'application offre une interface dark-mode inspirée des centres de commandemen
 
 ### 1. Cloner le Dépôt
 ```bash
-git clone https://github.com/OualidML/soumission-ai-dz.git
-cd soumission-ai-dz
+git clone https://github.com/OualidML/Soumission-Dz.git
+cd Soumission-Dz
 ```
 
 ### 2. Installer les Dépendances
