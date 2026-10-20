@@ -1,0 +1,68 @@
+{
+  "companyProfiles": [
+    {
+      "id": "enterprise-solar-dz",
+      "name": "ADERFP Green Energy & Electrification SPA",
+      "type": "Entreprise Établie (SPA)",
+      "wilaya": "Alger / Constantine",
+      "rc": "16/00-0984512B19",
+      "nif": "001916098451288",
+      "nis": "1999161004521",
+      "yearsActive": 7,
+      "avgAnnualTurnoverDZD": 145000000,
+      "certifications": ["ISO 9001:2015", "Qualification Catégorie III - Électricité & Solaire"],
+      "cnasCasnosUpdated": true,
+      "extraitDeRoleStatus": "Apuré (Valide - moins de 3 mois)",
+      "cacobatphUpdated": true,
+      "startupLabel": null,
+      "engineersCount": 14,
+      "keyEquipment": ["Camions nacelles", "Analyseurs de réseau triphasé", "Stock onduleurs hybrides 50kW"]
+    },
+    {
+      "id": "startup-ai-constantine",
+      "name": "SolveTech AI Solutions SARL (Start-up Labellisée)",
+      "type": "Start-up Labellisée (Loi 23-12)",
+      "wilaya": "Constantine",
+      "rc": "25/00-1120499B25",
+      "nif": "002525112049941",
+      "nis": "2025251009912",
+      "yearsActive": 1,
+      "avgAnnualTurnoverDZD": 6500000,
+      "certifications": ["Label Start-up N° 25-0841 (Ministère de l'Économie de la Connaissance)"],
+      "cnasCasnosUpdated": true,
+      "extraitDeRoleStatus": "Apuré (Valide)",
+      "cacobatphUpdated": false,
+      "startupLabel": "Label Start-up Algérie (Exonération Bilans 3 ans & Références selon Loi 23-12)",
+      "engineersCount": 4,
+      "keyEquipment": ["Serveurs GPU Inférence Locale", "Architecture PWA Offline-First", "Pipelines OCR & Vision IA"]
+    }
+  ],
+  "sampleTenders": [
+    {
+      "id": "baosem-sonelgaz-2026",
+      "reference": "BAOSEM N° 4108/2026/SKTM",
+      "title": "Hybridation Solaire Photovoltaïque & Monitoring IA de 5 Stations Électriques",
+      "authority": "Sonelgaz - Shariket Kahraba wa Taket Moutadjadida (SKTM)",
+      "sector": "Énergies Renouvelables & Électricité",
+      "RawText": "CAHIER DES CHARGES - APPEL D'OFFRES NATIONAL OUVERT N° 4108/2026/SKTM. Objet : Étude, fourniture, installation et mise en service d'un système d'hybridation solaire photovoltaïque 500 kWc avec plateforme de monitoring prédictif IA. CONFORMÉMENT À LA LOI N° 23-12 DU 5 AOÛT 2023. Article 12 - Pièces constitutives des offres (3 Enveloppes séparées) : 1) DOSSIER DE CANDIDATURE : Déclaration de candidature, Déclaration de probité, Copie du Registre de Commerce électronique, NIF, NIS, Extrait de rôle apuré daté de moins de 3 mois, Mise à jour CNAS, CASNOS et CACOBATPH en cours de validité, Bilans financiers des 3 dernières années certifiés par un commissaire aux comptes avec chiffre d'affaires moyen >= 80 000 000 DA, Certificat ISO 9001:2015 ET Certificat ISO 14001:2015 (Management Environnemental - EXIGENCE ÉLIMINATOIRE). 2) OFFRE TECHNIQUE : Déclaration à souscrire, Cahier des charges paraphé avec mention manuscrite 'Lu et accepté', Mémoire technique justificatif, Liste d'au moins 5 ingénieurs en électrotechnique/IA affiliés à la CNAS. Note technique éliminatoire : 45/70 points. 3) OFFRE FINANCIÈRE : Lettre de soumission, Bordereau des Prix Unitaires (BPU), Détail Quantitatif et Estimatif (DQE). TVA applicable : 19% sur les prestations d'ingénierie et 9% sur les panneaux photovoltaïques conformément à la Loi de Finances.",
+      "bpuItems": [
+        { "code": "LOT-01", "designation": "Panneaux Photovoltaïques Bifaciaux 500 kWc", "unit": "Ens", "qty": 5, "unitPriceHT": 12400000, "claimedTotalHT": 62000000, "tvaRate": 9 },
+        { "code": "LOT-02", "designation": "Onduleurs Hybrides Triphasés + Armoires BT", "unit": "U", "qty": 10, "unitPriceHT": 1850000, "claimedTotalHT": 18500000, "tvaRate": 19 },
+        { "code": "LOT-03", "designation": "Système de Monitoring Prédictif IA & SCADA", "unit": "Forfait", "qty": 1, "unitPriceHT": 9500000, "claimedTotalHT": 8500000, "tvaRate": 19 }
+      ]
+    },
+    {
+      "id": "bomop-chu-constantine-2026",
+      "reference": "CONSULTATION N° 19/2026/CHU-CNE",
+      "title": "Déploiement d'une Plateforme IA Offline-First de Triage Clinique & Gestion des Ordonnances",
+      "authority": "Centre Hospitalo-Universitaire (CHU) de Constantine",
+      "sector": "Santé Numérique & Intelligence Artificielle",
+      "RawText": "CAHIER DES CHARGES - CONSULTATION OUVERTE AUX START-UPS LABELLISÉES ET ENTREPRISES TIC (LOI N° 23-12). Objet : Acquisition et déploiement d'une solution logicielle IA pour l'aide au triage dermatologique et la numérisation hors-ligne des ordonnances médicales. Dispositions spéciales Start-up (Loi 23-12 Art. 87) : Les entreprises détentrices du 'Label Start-up' sont dispensées de la présentation des bilans financiers des 3 dernières années et des références professionnelles antérieures. DOSSIER DE CANDIDATURE : Déclaration de candidature, Déclaration de probité, RC, NIF, Extrait de rôle apuré, Mise à jour CNAS/CASNOS, Copie du Label Start-up en cours de validité (pas d'obligation CACOBATPH pour les éditeurs logiciels). OFFRE TECHNIQUE : Architecture garantissant un fonctionnement 100% hors-ligne (< 50ms de latence), hébergement local des données médicales conformément à la Loi 18-07 relative à la protection des données personnelles, formation hebdomadaire du personnel médical. Note éliminatoire : 40/60. OFFRE FINANCIÈRE : Lettre de soumission, BPU et DQE en TTC (TVA 19%).",
+      "bpuItems": [
+        { "code": "MOD-01", "designation": "Moteur IA Multimodal Triage Dermatologique (Calibré)", "unit": "Licence", "qty": 1, "unitPriceHT": 2800000, "claimedTotalHT": 2800000, "tvaRate": 19 },
+        { "code": "MOD-02", "designation": "Module Prescription Offline-First (16 700 Médicaments)", "unit": "Site", "qty": 4, "unitPriceHT": 650000, "claimedTotalHT": 2600000, "tvaRate": 19 },
+        { "code": "MOD-03", "designation": "Cycles de Formation Hebdomadaire du Personnel Médical", "unit": "Session", "qty": 8, "unitPriceHT": 75000, "claimedTotalHT": 600000, "tvaRate": 19 }
+      ]
+    }
+  ]
+}
