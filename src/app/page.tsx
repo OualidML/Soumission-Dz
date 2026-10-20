@@ -109,6 +109,7 @@ export default function HomePage() {
           tenderData: activeT,
           companyProfile: activeP,
           rawTenderText: activeT.RawText,
+          isCustomUpload: isCustom,
         }),
       });
 
@@ -476,14 +477,14 @@ export default function HomePage() {
               </div>
 
               {/* FATAL TRAPS LIST OR STARTUP EXEMPTIONS */}
-              {result.pass2Critic.fatalTrapsIdentified.length > 0 && (
+              {((result?.pass2Critic?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || []).length > 0) && (
                 <div className="mt-4 pt-4 border-t border-red-900/40 space-y-2">
                   <div className="text-xs font-bold text-red-300 uppercase tracking-wider flex items-center space-x-1.5">
                     <Flame className="h-3.5 w-3.5 text-red-400" />
                     <span>Pièges Fatals Relevés par le Président de la COPEO (Pass 2 Critic) :</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {result.pass2Critic.fatalTrapsIdentified.map((trap, idx) => (
+                    {(result?.pass2Critic?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || []).map((trap, idx) => (
                       <div
                         key={idx}
                         className="bg-red-950/40 border border-red-800/80 rounded-lg p-3 text-xs space-y-1"
@@ -505,14 +506,14 @@ export default function HomePage() {
                 </div>
               )}
 
-              {result.pass2Critic.regulatoryExemptionsApplied.length > 0 && (
+              {((result?.pass2Critic?.regulatoryExemptionsApplied || []).length > 0) && (
                 <div className="mt-4 pt-4 border-t border-emerald-900/40 space-y-2">
                   <div className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center space-x-1.5">
                     <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
                     <span>Mesures Dérogatoires & Dispenses Légales Activées (Loi n° 23-12 Art. 87) :</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {result.pass2Critic.regulatoryExemptionsApplied.map((ex, idx) => (
+                    {(result?.pass2Critic?.regulatoryExemptionsApplied || []).map((ex, idx) => (
                       <div
                         key={idx}
                         className="bg-emerald-950/40 border border-emerald-800/80 rounded-lg p-3 text-xs space-y-1"

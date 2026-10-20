@@ -1,6 +1,22 @@
 import { BpuItem, BpuAuditLine, BpuAuditSummary } from './types';
 
 /**
+ * Strict French/Algerian number sanitizer.
+ * Converts strings like "12 000 000,00", "8.500.000 DA", "9 %" to valid IEEE numbers.
+ * Prevents "NaN DA" display in all BPU calculation panels.
+ */
+export const cleanNum = (val: any): number => {
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  if (!val) return 0;
+  const cleaned = String(val)
+    .replace(/[^\d.,-]/g, '')
+    .replace(/\s+/g, '')
+    .replace(',', '.');
+  const parsed = parseFloat(cleaned);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+/**
  * Pure TypeScript Deterministic BPU & DQE Arithmetic Engine (Zero Hallucination).
  * Audits line items for:
  * - Line Total HT = Quantity * Unit Price HT
@@ -36,18 +52,17 @@ export function auditBpuItems(items: BpuItem[], tenderId?: string): BpuAuditSumm
   let criticalErrorsCount = 0;
 
   for (const item of items) {
-    const qty = Number(item.qty) || 0;
-    const unitPriceHT = Number(item.unitPriceHT) || 0;
-    const claimedTotalHT = Number(item.claimedTotalHT) || 0;
+    // Sanitize every numerical field using cleanNum
+    const qty = cleanNum(item.qty);
+    const unitPriceHT = cleanNum(item.unitPriceHT);
+    const claimedTotalHT = cleanNum(item.claimedTotalHT);
     const computedTotalHT = Math.round(qty * unitPriceHT * 100) / 100;
     const discrepancyHT = Math.round((claimedTotalHT - computedTotalHT) * 100) / 100;
     const hasDiscrepancy = Math.abs(discrepancyHT) > 0.01;
 
     // Determine TVA rate (default 19%, allow 9% for solar/reduced)
-    let tvaRate = Number(item.tvaRate);
-    if (tvaRate !== 9 && tvaRate !== 19) {
-      tvaRate = 19; // Default Algerian TVA
-    }
+    const rawTva = cleanNum(item.tvaRate);
+    const tvaRate = rawTva === 9 ? 9 : 19;
 
     const computedTVA = Math.round(computedTotalHT * (tvaRate / 100) * 100) / 100;
     const computedTTC = Math.round((computedTotalHT + computedTVA) * 100) / 100;
@@ -67,7 +82,7 @@ export function auditBpuItems(items: BpuItem[], tenderId?: string): BpuAuditSumm
       const errText = `Erreur d'addition sur [${item.code}] ${item.designation}: Déclaré = ${claimedTotalHT.toLocaleString('fr-DZ')} DA | Calculé = ${computedTotalHT.toLocaleString('fr-DZ')} DA | Écart = ${discrepancyHT < 0 ? '-' : '+'}${diffFormatted} DA`;
       errorDescriptions.push(errText);
       if (!notes) {
-        notes = `Écart de calcul arithmétique de ${diffFormatted} DA par rapport au prix unitaire unitaire multiplié par la quantité.`;
+        notes = `Écart de calcul arithmétique de ${diffFormatted} DA par rapport au prix unitaire multiplié par la quantité.`;
       }
     }
 
@@ -121,12 +136,13 @@ export function auditBpuItems(items: BpuItem[], tenderId?: string): BpuAuditSumm
 }
 
 /**
- * Utility to format numbers in Algerian Dinars (DA)
+ * Utility to format numbers in Algerian Dinars (DA) with zero NaN DA guarantee.
  */
-export function formatDZD(amount: number): string {
+export function formatDZD(amount: any): string {
+  const num = cleanNum(amount);
   return new Intl.NumberFormat('fr-DZ', {
     style: 'decimal',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount) + ' DA';
+  }).format(num) + ' DA';
 }

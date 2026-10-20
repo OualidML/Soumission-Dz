@@ -58,13 +58,17 @@ export function DocumentUploader({
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
-          const pageStr = textContent.items
-            .map((item: any) => (item.str ? item.str : ''))
+          const pageStr = (textContent.items || [])
+            .map((item: any) => {
+              if (!item || typeof item.str !== 'string') return '';
+              return item.str.replace(/\u0000/g, '');
+            })
+            .filter(Boolean)
             .join(' ');
           pageTexts.push(`--- Page ${i} ---\n${pageStr}`);
         }
 
-        const fullText = pageTexts.join('\n\n');
+        const fullText = pageTexts.join('\n\n').replace(/\u0000/g, '');
         if (fullText.trim().length > 30) {
           return fullText;
         }
@@ -88,10 +92,11 @@ export function DocumentUploader({
           const textMatches = block.match(/\(([^()]+)\)/g);
           if (textMatches) {
             const blockText = textMatches
-              .map((m) => m.slice(1, -1))
+              .map((m) => (m ? m.slice(1, -1) : ''))
               .join(' ')
               .replace(/\\r|\\n/g, ' ')
-              .replace(/\\/g, '');
+              .replace(/\\/g, '')
+              .replace(/\u0000/g, '');
             if (blockText.trim().length > 2) {
               extractedChunks.push(blockText);
             }
@@ -100,7 +105,7 @@ export function DocumentUploader({
       }
 
       if (extractedChunks.length > 0) {
-        return `[Extrait PDF (Mode Dégradé Sécurisé)]\n${extractedChunks.join('\n')}`;
+        return `[Extrait PDF (Mode Dégradé Sécurisé)]\n${extractedChunks.join('\n')}`.replace(/\u0000/g, '');
       }
     } catch (fallbackErr) {
       console.error('[DocumentUploader] Fallback parser failed:', fallbackErr);
@@ -123,7 +128,8 @@ export function DocumentUploader({
         text = await file.text();
       }
 
-      onTextExtracted(text, file.name);
+      const sanitizedText = (text || '').replace(/\u0000/g, '');
+      onTextExtracted(sanitizedText, file.name);
       setShowTextarea(true);
     } catch (err: any) {
       console.error('File extraction error:', err);
