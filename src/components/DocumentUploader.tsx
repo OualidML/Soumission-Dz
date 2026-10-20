@@ -1,7 +1,27 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileText, CheckCircle2, AlertCircle, Eye, EyeOff, X, FileUp } from 'lucide-react';
+import {
+  Box,
+  Stack,
+  Typography,
+  TextField,
+  Button,
+  Chip,
+  Alert,
+  CircularProgress,
+} from '@mui/material';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import DescriptionIcon from '@mui/icons-material/Description';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import CloseIcon from '@mui/icons-material/Close';
+
+import { NERO } from '@/theme';
+
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 interface DocumentUploaderProps {
   extractedText: string;
@@ -183,123 +203,178 @@ export function DocumentUploader({
   };
 
   return (
-    <div className="space-y-2.5">
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
       {/* DRAG AND DROP ZONE */}
-      <div
+      <Box
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-3.5 transition-all cursor-pointer flex flex-col items-center justify-center text-center ${
-          isDragging
-            ? 'border-cyan-400 bg-cyan-950/40 shadow-cyber-neon'
+        sx={{
+          border: '2px dashed',
+          borderColor: isDragging
+            ? NERO.tealDeep
             : activeFileName
-            ? 'border-emerald-600/80 bg-emerald-950/20'
-            : 'border-slate-700/80 hover:border-cyan-500/60 bg-slate-950/60 hover:bg-slate-900/60'
-        }`}
+            ? 'rgba(31,122,85,0.5)'
+            : NERO.line,
+          bgcolor: isDragging
+            ? 'rgba(108,168,201,0.12)'
+            : activeFileName
+            ? 'rgba(238,247,242,0.7)'
+            : NERO.paper,
+          borderRadius: 3,
+          p: 1.75,
+          cursor: 'pointer',
+          textAlign: 'center',
+          transition: 'all .2s',
+          '&:hover': { borderColor: NERO.teal, bgcolor: 'rgba(108,168,201,0.06)' },
+        }}
       >
         <input
           ref={fileInputRef}
           type="file"
           accept=".pdf,.txt,.json,.md"
-          className="hidden"
+          style={{ display: 'none' }}
           onChange={handleFileChange}
         />
 
-        <div className="flex items-center space-x-2 text-xs">
-          {isProcessing ? (
-            <div className="flex items-center space-x-2 text-cyan-400 font-mono">
-              <span className="h-4 w-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-              <span>Extraction du texte PDF en cours (Client-Side Zero-Crash)...</span>
-            </div>
-          ) : activeFileName ? (
-            <div className="flex items-center space-x-2 text-emerald-300">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span className="font-semibold font-mono text-emerald-400">{activeFileName}</span>
-              <span className="text-[11px] text-slate-400">({extractedText.length.toLocaleString()} caractères extraits)</span>
-            </div>
-          ) : (
-            <div className="flex items-center space-x-2 text-slate-300">
-              <UploadCloud className="h-4 w-4 text-cyan-400" />
-              <span className="font-semibold text-white">Glisser-déposer un Cahier des Charges PDF / TXT</span>
-              <span className="text-slate-400">ou cliquez pour parcourir</span>
-            </div>
-          )}
-        </div>
+        {isProcessing ? (
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
+            <CircularProgress size={16} sx={{ color: NERO.tealDeep }} />
+            <Typography sx={{ fontSize: 12, fontFamily: MONO, color: NERO.tealDeep }}>
+              Extraction du texte PDF en cours (client-side)...
+            </Typography>
+          </Stack>
+        ) : activeFileName ? (
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+            <CheckCircleIcon sx={{ fontSize: 18, color: NERO.success }} />
+            <Typography sx={{ fontSize: 12.5, fontWeight: 800, fontFamily: MONO, color: NERO.success }}>
+              {activeFileName}
+            </Typography>
+            <Typography sx={{ fontSize: 11, color: NERO.muted }}>
+              ({extractedText.length.toLocaleString('fr-DZ')} caractères extraits)
+            </Typography>
+          </Stack>
+        ) : (
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+            <CloudUploadIcon sx={{ fontSize: 20, color: NERO.tealDeep }} />
+            <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: NERO.ink }}>
+              Glisser-déposer un cahier des charges PDF / TXT
+            </Typography>
+            <Typography sx={{ fontSize: 11.5, color: NERO.muted }}>ou cliquez pour parcourir</Typography>
+          </Stack>
+        )}
 
-        <p className="text-[10px] text-slate-500 mt-1">
-          Supporte PDF, TXT & JSON • Extraction 100% locale sécurisée (aucun fichier brut envoyé sur le réseau)
-        </p>
-      </div>
+        <Typography sx={{ fontSize: 10, color: NERO.muted, mt: 0.5 }}>
+          PDF, TXT & JSON · extraction 100% locale sécurisée (aucun fichier brut envoyé)
+        </Typography>
+      </Box>
 
       {/* ERROR ALERT */}
       {errorMessage && (
-        <div className="p-2 rounded-lg bg-red-950/60 border border-red-800 text-red-200 text-xs flex items-center space-x-2">
-          <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
-          <span>{errorMessage}</span>
-        </div>
+        <Alert
+          severity="error"
+          icon={<ErrorOutlineIcon sx={{ fontSize: 18 }} />}
+          sx={{
+            py: 0.25,
+            borderRadius: 2,
+            bgcolor: NERO.dangerSoft,
+            color: NERO.danger,
+            fontSize: 11.5,
+            '& .MuiAlert-icon': { color: NERO.danger },
+          }}
+        >
+          {errorMessage}
+        </Alert>
       )}
 
-      {/* GREEN STATUS BADGE WHEN LOADED */}
+      {/* STATUS BADGE WHEN LOADED */}
       {activeFileName && (
-        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-700/80 text-xs font-mono">
-          <div className="flex items-center space-x-2 text-emerald-300">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
-            <span className="font-bold">
-              ✅ Document PDF Chargé : {activeFileName} — Prêt pour l&apos;Audit Gemma 4
-            </span>
-          </div>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          sx={{
+            px: 1.5,
+            py: 0.75,
+            borderRadius: 2.5,
+            bgcolor: NERO.successSoft,
+            border: '1px solid rgba(31,122,85,0.25)',
+            flexWrap: 'wrap',
+            rowGap: 0.5,
+          }}
+        >
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <CheckCircleIcon sx={{ fontSize: 15, color: NERO.success }} />
+            <Typography sx={{ fontSize: 11, fontWeight: 700, color: NERO.success }}>
+              Document chargé — prêt pour l&apos;audit
+            </Typography>
+            <Chip
+              size="small"
+              label={activeFileName}
+              sx={{ height: 20, fontFamily: MONO, fontSize: 9.5, bgcolor: 'rgba(31,122,85,0.1)', color: NERO.success }}
+            />
+          </Stack>
 
-          <div className="flex items-center space-x-2">
-            <button
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <Button
               type="button"
+              size="small"
               onClick={(e) => {
                 e.stopPropagation();
                 setShowTextarea(!showTextarea);
               }}
-              className="text-[11px] text-emerald-400 hover:text-emerald-300 underline flex items-center space-x-1"
+              startIcon={showTextarea ? <VisibilityOffIcon sx={{ fontSize: 13 }} /> : <VisibilityIcon sx={{ fontSize: 13 }} />}
+              sx={{ minHeight: 24, py: 0, px: 1, fontSize: 10.5, color: NERO.success, fontWeight: 600 }}
             >
-              {showTextarea ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-              <span>{showTextarea ? 'Masquer texte' : 'Voir texte'}</span>
-            </button>
+              {showTextarea ? 'Masquer texte' : 'Voir texte'}
+            </Button>
 
-            <button
+            <Button
               type="button"
+              size="small"
               onClick={(e) => {
                 e.stopPropagation();
                 onClearFile();
               }}
-              className="p-1 text-slate-400 hover:text-red-400 transition-colors"
               title="Réinitialiser le fichier"
+              sx={{ minWidth: 26, minHeight: 26, p: 0, color: NERO.muted, '&:hover': { color: NERO.danger } }}
             >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+              <CloseIcon sx={{ fontSize: 15 }} />
+            </Button>
+          </Stack>
+        </Stack>
       )}
 
-      {/* COLLAPSIBLE / EDITABLE EXTRACTED TEXT TEXTAREA */}
+      {/* COLLAPSIBLE / EDITABLE EXTRACTED TEXT */}
       {showTextarea && (
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span className="font-mono flex items-center space-x-1">
-              <FileText className="h-3 w-3 text-cyan-400" />
-              <span>📄 Texte Extrait du Cahier des Charges (Vérifiable / Modifiable) :</span>
-            </span>
-            <span className="text-[10px] font-mono text-slate-500">
-              {extractedText.length} caractères • Modifiable en direct
-            </span>
-          </div>
+        <Box>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5, flexWrap: 'wrap', rowGap: 0.25 }}>
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <DescriptionIcon sx={{ fontSize: 13, color: NERO.tealDeep }} />
+              <Typography sx={{ fontSize: 10.5, fontFamily: MONO, color: NERO.muted }}>
+                Texte extrait (vérifiable / modifiable)
+              </Typography>
+            </Stack>
+            <Typography sx={{ fontSize: 10, fontFamily: MONO, color: NERO.muted }}>
+              {extractedText.length} caractères
+            </Typography>
+          </Stack>
 
-          <textarea
+          <TextField
+            fullWidth
+            multiline
             rows={4}
             value={extractedText}
             onChange={(e) => onTextExtracted(e.target.value, activeFileName || undefined)}
             placeholder="Le texte extrait de votre document PDF ou saisi manuellement s'affiche ici. Vous pouvez l'ajuster ou ajouter des clauses éliminatoires et des lignes de prix avant de lancer l'analyse..."
-            className="w-full bg-slate-950 border border-slate-700/80 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed"
+            sx={{
+              '& .MuiOutlinedInput-root': { bgcolor: '#fff', borderRadius: 2.5 },
+              '& textarea': { fontFamily: MONO, fontSize: 11.5, lineHeight: 1.6 },
+            }}
           />
-        </div>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 }

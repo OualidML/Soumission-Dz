@@ -11,6 +11,10 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@emotion/react": "^11.13.3",
+    "@emotion/styled": "^11.13.0",
+    "@mui/icons-material": "^5.16.7",
+    "@mui/material": "^5.16.7",
     "clsx": "^2.1.1",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.468.0",

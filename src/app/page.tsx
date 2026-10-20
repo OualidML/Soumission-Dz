@@ -2,40 +2,177 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  ShieldAlert,
-  ShieldCheck,
-  Cpu,
-  FileText,
-  Calculator,
-  Terminal,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-  Copy,
-  Printer,
-  ChevronDown,
-  ChevronUp,
-  Sparkles,
-  Layers,
-  Building2,
-  FileCode,
-  Flame,
-  Award,
-  BookOpen,
-  ArrowRight,
-  ExternalLink,
-  Info,
-} from 'lucide-react';
+  ThemeProvider,
+  CssBaseline,
+  Box,
+  Stack,
+  Typography,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Tabs,
+  Tab,
+  TextField,
+  MenuItem,
+  Divider,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  TableContainer,
+  CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Alert,
+  LinearProgress,
+  ToggleButtonGroup,
+  ToggleButton,
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import MemoryIcon from '@mui/icons-material/Memory';
+import GppMaybeIcon from '@mui/icons-material/GppMaybe';
+import VerifiedIcon from '@mui/icons-material/Verified';
+import DescriptionIcon from '@mui/icons-material/Description';
+import CalculateIcon from '@mui/icons-material/Calculate';
+import TerminalIcon from '@mui/icons-material/Terminal';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import CancelIcon from '@mui/icons-material/Cancel';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import PrintIcon from '@mui/icons-material/Print';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import LayersIcon from '@mui/icons-material/Layers';
+import BusinessIcon from '@mui/icons-material/Business';
+import CodeIcon from '@mui/icons-material/Code';
+import WhatshotIcon from '@mui/icons-material/Whatshot';
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import GridViewIcon from '@mui/icons-material/GridView';
+
+import theme, { NERO } from '@/theme';
 import demoData from '../../demo-data/algerian-tenders.json';
-import { TenderData, CompanyProfile, AnalysisResponse, EnvelopeKey } from '@/lib/types';
+import { TenderData, CompanyProfile, AnalysisResponse, EnvelopeKey, EnvelopeCheckItem } from '@/lib/types';
 import { formatDZD } from '@/lib/bpu-math';
 import { DocumentUploader } from '@/components/DocumentUploader';
+
+const MONO = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+
+function Serif({ children }: { children: React.ReactNode }) {
+  return <span className="serif-accent">{children}</span>;
+}
+
+const ENVELOPE_STATUS: Record<
+  EnvelopeCheckItem['status'],
+  { label: string; bg: string; color: string; border: string; icon: React.ReactNode }
+> = {
+  COMPLIANT: {
+    label: 'CONFORME',
+    bg: NERO.successSoft,
+    color: NERO.success,
+    border: 'rgba(31,122,85,0.28)',
+    icon: <CheckCircleOutlineIcon sx={{ fontSize: 14 }} />,
+  },
+  EXEMPTED_BY_LAW: {
+    label: 'DISPENSE ART. 87',
+    bg: '#EAF3F8',
+    color: NERO.tealDeep,
+    border: 'rgba(53,111,143,0.28)',
+    icon: <AutoAwesomeIcon sx={{ fontSize: 14 }} />,
+  },
+  NON_COMPLIANT: {
+    label: 'NON CONFORME',
+    bg: NERO.dangerSoft,
+    color: NERO.danger,
+    border: 'rgba(179,38,30,0.28)',
+    icon: <CancelIcon sx={{ fontSize: 14 }} />,
+  },
+  WARNING: {
+    label: 'VIGILANCE',
+    bg: NERO.warningSoft,
+    color: NERO.warning,
+    border: 'rgba(183,121,31,0.32)',
+    icon: <WarningAmberIcon sx={{ fontSize: 14 }} />,
+  },
+};
+
+function StatusChip({ status }: { status: EnvelopeCheckItem['status'] }) {
+  const meta = ENVELOPE_STATUS[status];
+  return (
+    <Chip
+      size="small"
+      icon={<Box sx={{ display: 'flex', color: meta.color }}>{meta.icon}</Box>}
+      label={meta.label}
+      sx={{
+        bgcolor: meta.bg,
+        color: meta.color,
+        border: `1px solid ${meta.border}`,
+        fontFamily: MONO,
+        fontSize: 10,
+        letterSpacing: '.04em',
+        '& .MuiChip-icon': { ml: 1 },
+      }}
+    />
+  );
+}
+
+function RiskGauge({ value }: { value: number }) {
+  const critical = value >= 15;
+  const color = critical ? NERO.danger : NERO.success;
+  return (
+    <Box sx={{ position: 'relative', display: 'inline-flex', width: 136, height: 136 }}>
+      <CircularProgress
+        variant="determinate"
+        value={100}
+        size={136}
+        thickness={4}
+        sx={{ position: 'absolute', color: 'rgba(20,18,15,0.07)' }}
+      />
+      <CircularProgress
+        variant="determinate"
+        value={Math.min(100, Math.max(0, value))}
+        size={136}
+        thickness={4}
+        sx={{
+          position: 'absolute',
+          color,
+          transform: 'rotate(-90deg)',
+          '& .MuiCircularProgress-circle': { strokeLinecap: 'round' },
+        }}
+      />
+      <Box
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 0.25,
+        }}
+      >
+        <Typography sx={{ fontFamily: MONO, fontWeight: 900, fontSize: 28, lineHeight: 1, color }}>
+          {value}%
+        </Typography>
+        <Typography sx={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.muted }}>
+          Risque rejet
+        </Typography>
+        <Typography sx={{ fontSize: 9.5, fontFamily: MONO, color: critical ? NERO.danger : NERO.success }}>
+          {critical ? '≥ 15% alerte' : '< 15% sécurisé'}
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
 
 export default function HomePage() {
   const tenders: TenderData[] = demoData.sampleTenders as any;
   const profiles: CompanyProfile[] = demoData.companyProfiles as any;
 
-  // Selected state
   const [selectedTenderId, setSelectedTenderId] = useState<string>(tenders[0].id);
   const [selectedProfileId, setSelectedProfileId] = useState<string>(profiles[0].id);
   const [customText, setCustomText] = useState<string>('');
@@ -43,24 +180,21 @@ export default function HomePage() {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [inputTab, setInputTab] = useState<'sample' | 'pdf'>('sample');
 
-  // Analysis result & loading state
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [stepMessage, setStepMessage] = useState<string>('');
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // UI tabs & toggles
-  const [activeEnvelope, setActiveEnvelope] = useState<'ENVELOPE_A' | 'ENVELOPE_B' | 'ENVELOPE_C'>('ENVELOPE_A');
+  const [activeEnvelope, setActiveEnvelope] = useState<EnvelopeKey>('ENVELOPE_A');
   const [isTerminalExpanded, setIsTerminalExpanded] = useState<boolean>(false);
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  // Current objects
   const currentTender = isCustomMode
     ? {
         id: 'custom-tender',
         reference: 'CUSTOM/2026/DZ',
         title: 'Cahier des charges personnalisé (Texte libre)',
-        authority: 'Maître d\'Ouvrage Non Spécifié',
+        authority: "Maître d'Ouvrage Non Spécifié",
         sector: 'Marché Public Personnalisé',
         RawText: customText || 'Cahier des charges...',
         bpuItems: [],
@@ -69,9 +203,9 @@ export default function HomePage() {
 
   const currentProfile = profiles.find((p) => p.id === selectedProfileId) || profiles[0];
 
-  // Auto-run analysis on initial load
   useEffect(() => {
     runAudit(selectedTenderId, selectedProfileId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runAudit = async (tenderIdToUse = selectedTenderId, profileIdToUse = selectedProfileId) => {
@@ -81,7 +215,12 @@ export default function HomePage() {
 
     try {
       const uploadedCustomText = customText;
-      const isCustom = inputTab === 'pdf' || isCustomMode || selectedTenderId === 'custom' || selectedTenderId === 'custom-tender' || (!!uploadedCustomText && uploadedCustomText.trim().length > 0);
+      const isCustom =
+        inputTab === 'pdf' ||
+        isCustomMode ||
+        selectedTenderId === 'custom' ||
+        selectedTenderId === 'custom-tender' ||
+        (!!uploadedCustomText && uploadedCustomText.trim().length > 0);
       const isCustomUpload = isCustom || selectedTenderId === 'custom' || Boolean(uploadedCustomText);
 
       const activeT = isCustom
@@ -93,17 +232,16 @@ export default function HomePage() {
             title: uploadedFileName ? `Cahier des Charges — ${uploadedFileName}` : 'Cahier des charges personnalisé',
             authority: 'Commission des Marchés Publics',
             sector: 'Marché Public Personnalisé',
-            RawText: uploadedCustomText || 'Cahier des charges soumis à l\'audit...',
+            RawText: uploadedCustomText || "Cahier des charges soumis à l'audit...",
             bpuItems: [],
           }
         : tenders.find((t) => t.id === tenderIdToUse) || tenders[0];
 
       const activeP = profiles.find((p) => p.id === profileIdToUse) || profiles[0];
 
-      // Simulate step progress for user feedback
       setTimeout(() => setStepMessage('2/4 Audit arithmétique déterministe BPU & DQE (DZD)...'), 400);
-      setTimeout(() => setStepMessage('3/4 Pass 1: Extraction Enveloppes Loi 23-12 & Mémoire Gemma 4...'), 800);
-      setTimeout(() => setStepMessage('4/4 Pass 2: Critique Adversarial COPEO & Règle des 15%...'), 1200);
+      setTimeout(() => setStepMessage('3/4 Pass 1 : Extraction Enveloppes Loi 23-12 & Mémoire...'), 800);
+      setTimeout(() => setStepMessage('4/4 Pass 2 : Critique Adversarial COPEO & Règle des 15%...'), 1200);
 
       const res = await fetch('/api/analyze-tender', {
         method: 'POST',
@@ -125,15 +263,11 @@ export default function HomePage() {
       setResult(data);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'Une erreur est survenue lors de l\'analyse');
+      setErrorMsg(err.message || "Une erreur est survenue lors de l'analyse");
     } finally {
       setIsLoading(false);
       setStepMessage('');
     }
-  };
-
-  const handleAnalyze = async (tenderIdToUse = selectedTenderId, profileIdToUse = selectedProfileId) => {
-    return runAudit(tenderIdToUse, profileIdToUse);
   };
 
   const copyMemoireToClipboard = () => {
@@ -147,7 +281,6 @@ export default function HomePage() {
     window.print();
   };
 
-  // Quick preset triggers
   const setPresetSonelgazAderfp = () => {
     setIsCustomMode(false);
     setInputTab('sample');
@@ -168,747 +301,901 @@ export default function HomePage() {
     runAudit('bomop-chu-constantine-2026', 'startup-ai-constantine');
   };
 
+  const isCritical = result?.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING';
+
+  const fatalTraps: any[] =
+    (result?.pass2Critic as any)?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || [];
+
+  const exemptions = (result?.pass2Critic as any)?.regulatoryExemptionsApplied || [];
+
+  const currentEnv = result
+    ? activeEnvelope === 'ENVELOPE_A'
+      ? result.pass1Result.envelopes.envelopeA
+      : activeEnvelope === 'ENVELOPE_B'
+      ? result.pass1Result.envelopes.envelopeB
+      : result.pass1Result.envelopes.envelopeC
+    : null;
+
   return (
-    <div className="min-h-screen text-slate-100 flex flex-col font-sans">
-      {/* TOP HEADER */}
-      <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-cyan-500 to-emerald-500 flex items-center justify-center shadow-cyber-neon">
-              <Cpu className="h-6 w-6 text-slate-950 font-bold" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xl font-black tracking-tight text-white">
-                  Soumission<span className="text-cyan-400">AI</span><span className="text-emerald-400">-DZ</span>
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono border border-slate-700">
-                  v1.0.0
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">
-                Système Multi-Agents d&apos;Audit des Cahiers des Charges — <span className="text-slate-300 font-medium">Loi n° 23-12</span> du 5 août 2023
-              </p>
-            </div>
-          </div>
-
-          {/* STATUS BADGES */}
-          <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-cyan-950/60 border border-cyan-800/60 text-cyan-300">
-              <span className="h-2 w-2 rounded-full bg-cyan-400 neon-pulse"></span>
-              <span className="font-semibold">Gemma 4 26B-A4B MoE</span>
-              <span className="text-cyan-400/80">Active</span>
-            </div>
-
-            <div className="flex items-center space-x-1 px-2.5 py-1 rounded-md bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
-              <Award className="h-3.5 w-3.5" />
-              <span>Apache-2.0</span>
-              <span className="text-emerald-400/80">Open Source</span>
-            </div>
-
-            <div className="flex items-center space-x-1 px-2.5 py-1 rounded-md bg-slate-800/80 border border-slate-700 text-slate-300">
-              <Layers className="h-3.5 w-3.5 text-amber-400" />
-              <span>3 Modular</span>
-              <span className="text-amber-400">SKILL.md</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* QUICK PRESETS BANNER */}
-      <div className="bg-slate-900/60 border-b border-slate-800/60 px-4 py-2">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center space-x-2 text-slate-400">
-            <Sparkles className="h-4 w-4 text-cyan-400" />
-            <span className="font-medium text-slate-300">Scénarios Démo 1-Click (Évaluation Jury) :</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={setPresetSonelgazAderfp}
-              className="px-3 py-1 rounded bg-red-950/50 hover:bg-red-900/60 text-red-300 border border-red-800/70 transition-colors flex items-center space-x-1.5"
-            >
-              <ShieldAlert className="h-3.5 w-3.5 text-red-400" />
-              <span>🔴 Test Rejet COPEO (Sonelgaz + ADERFP : ISO manquant + Erreur 1M DA)</span>
-            </button>
-            <button
-              onClick={setPresetChuSolvetech}
-              className="px-3 py-1 rounded bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/70 transition-colors flex items-center space-x-1.5"
-            >
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-              <span>🟢 Test Succès Start-up (CHU Constantine + SolveTech : Dispense Art. 87)</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* MAIN CONTAINER */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
-        {/* CONTROL BAR */}
-        <section className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur shadow-xl">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-            {/* SELECTOR 1: TENDER & DOCUMENT UPLOADER */}
-            <div className="md:col-span-5 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-                  <FileText className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>1. Cahier des Charges Algérien</span>
-                </span>
-                <div className="flex items-center space-x-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInputTab('sample');
-                      setIsCustomMode(false);
-                    }}
-                    className={`px-2 py-0.5 rounded transition-colors ${
-                      inputTab === 'sample' && !isCustomMode
-                        ? 'bg-cyan-950 text-cyan-300 font-semibold'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Modèles
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInputTab('pdf');
-                      setIsCustomMode(true);
-                    }}
-                    className={`px-2 py-0.5 rounded transition-colors ${
-                      inputTab === 'pdf' || isCustomMode
-                        ? 'bg-cyan-950 text-cyan-300 font-semibold'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Importer PDF/TXT
-                  </button>
-                </div>
-              </div>
-
-              {inputTab === 'pdf' || isCustomMode ? (
-                <DocumentUploader
-                  extractedText={customText}
-                  onTextExtracted={(text, fileName) => {
-                    setCustomText(text);
-                    if (fileName) setUploadedFileName(fileName);
-                    setIsCustomMode(true);
-                  }}
-                  activeFileName={uploadedFileName}
-                  onClearFile={() => {
-                    setUploadedFileName(null);
-                    setCustomText('');
-                    setIsCustomMode(false);
-                    setInputTab('sample');
-                  }}
-                />
-              ) : (
-                <select
-                  value={selectedTenderId}
-                  onChange={(e) => setSelectedTenderId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
-                >
-                  {tenders.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      [{t.reference}] {t.title} — {t.authority}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            {/* SELECTOR 2: BIDDER PROFILE */}
-            <div className="md:col-span-4 space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-                <Building2 className="h-3.5 w-3.5 text-emerald-400" />
-                <span>2. Profil de l&apos;Entreprise Soumissionnaire</span>
-              </label>
-              <select
-                value={selectedProfileId}
-                onChange={(e) => setSelectedProfileId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: NERO.paper }}>
+        {/* ===== STICKY DARK PILL NAV (NERO style) ===== */}
+        <Box
+          className="no-print"
+          sx={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 60,
+            p: { xs: 1.5, sm: '18px 24px' },
+            bgcolor: 'rgba(245,242,236,0.82)',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <Box
+            sx={{
+              maxWidth: 1160,
+              mx: 'auto',
+              bgcolor: NERO.dark,
+              borderRadius: 999,
+              pl: { xs: 2, sm: 2.75 },
+              pr: { xs: 1, sm: 1.25 },
+              py: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              boxShadow: '0 14px 34px rgba(20,18,15,0.24)',
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+              <Box
+                sx={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 2.5,
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: `linear-gradient(135deg, ${NERO.teal}, ${NERO.tealDeep})`,
+                  flexShrink: 0,
+                }}
               >
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.type} - {p.wilaya})
-                  </option>
-                ))}
-              </select>
-            </div>
+                <MemoryIcon sx={{ color: '#fff', fontSize: 22 }} />
+              </Box>
+              <Box sx={{ minWidth: 0 }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography sx={{ color: '#fff', fontWeight: 900, fontSize: { xs: 16, sm: 18 }, letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>
+                    Soumission
+                    <Box component="span" sx={{ color: NERO.teal }}>
+                      AI
+                    </Box>
+                    <Box component="span" sx={{ color: '#9fd0e3' }}>
+                      -DZ
+                    </Box>
+                  </Typography>
+                  <Chip
+                    label="v1.0.0"
+                    size="small"
+                    sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.75)', fontFamily: MONO, fontSize: 10 }}
+                  />
+                </Stack>
+                <Typography sx={{ color: 'rgba(255,255,255,0.55)', fontSize: { xs: 10.5, sm: 11.5 }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Audit des cahiers des charges — Loi n° 23-12
+                </Typography>
+              </Box>
+            </Stack>
 
-            {/* PRIMARY CTA */}
-            <div className="md:col-span-3">
-              <button
-                onClick={() => runAudit(selectedTenderId, selectedProfileId)}
-                disabled={isLoading}
-                className={`w-full py-2.5 px-4 rounded-lg font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-lg ${
-                  isLoading
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                    : 'bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 shadow-cyber-neon hover:shadow-cyan-500/50 active:scale-[0.98]'
-                }`}
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ display: { xs: 'none', md: 'flex' } }}>
+              <Stack
+                direction="row"
+                spacing={0.75}
+                alignItems="center"
+                sx={{ px: 1.5, py: 0.75, borderRadius: 999, bgcolor: 'rgba(108,168,201,0.16)', border: '1px solid rgba(108,168,201,0.3)' }}
               >
-                {isLoading ? (
-                  <>
-                    <span className="h-4 w-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
-                    <span>Audit en cours...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4 text-slate-950" />
-                    <span>⚡ Lancer l&apos;Audit Multi-Agents</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+                <Box className="neon-pulse" sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: NERO.teal }} />
+                <Typography sx={{ color: '#BFE0EE', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  Gemma 4 26B
+                </Typography>
+              </Stack>
+              <Stack
+                direction="row"
+                spacing={0.75}
+                alignItems="center"
+                sx={{ px: 1.5, py: 0.75, borderRadius: 999, bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+              >
+                <EmojiEventsIcon sx={{ color: '#9fd0e3', fontSize: 14 }} />
+                <Typography sx={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 600 }}>
+                  Apache-2.0
+                </Typography>
+              </Stack>
+              <Stack
+                direction="row"
+                spacing={0.75}
+                alignItems="center"
+                sx={{ px: 1.5, py: 0.75, borderRadius: 999, bgcolor: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}
+              >
+                <LayersIcon sx={{ color: NERO.warning, fontSize: 14 }} />
+                <Typography sx={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 600 }}>
+                  3 SKILL.md
+                </Typography>
+              </Stack>
+            </Stack>
+          </Box>
+        </Box>
 
-          {/* ACTIVE PARAMETERS SNIPPET */}
-          <div className="mt-3 pt-3 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-slate-300 font-medium">Soumissionnaire actif :</span>
-              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 font-mono">
-                RC: {currentProfile.rc}
-              </span>
-              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 font-mono">
-                NIF: {currentProfile.nif}
-              </span>
-              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200">
-                {currentProfile.engineersCount} Ingénieurs
-              </span>
-              {currentProfile.startupLabel && (
-                <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold">
-                  ★ Start-up Labellisée
-                </span>
-              )}
-            </div>
+        {/* ===== DEMO PRESETS ===== */}
+        <Box className="no-print" sx={{ borderTop: `1px solid ${NERO.line}`, borderBottom: `1px solid ${NERO.line}`, bgcolor: 'rgba(237,232,223,0.55)', px: { xs: 2, sm: 3 }, py: 1.25 }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.5}
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            justifyContent="space-between"
+            sx={{ maxWidth: 1160, mx: 'auto' }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <AutoAwesomeIcon sx={{ color: NERO.tealDeep, fontSize: 17 }} />
+              <Typography sx={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', color: NERO.muted }}>
+                Scénarios démo 1-click
+              </Typography>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+              <Button
+                onClick={setPresetSonelgazAderfp}
+                size="small"
+                startIcon={<GppMaybeIcon sx={{ fontSize: 16 }} />}
+                sx={{
+                  bgcolor: NERO.dangerSoft,
+                  color: NERO.danger,
+                  border: '1px solid rgba(179,38,30,0.28)',
+                  fontSize: 12,
+                  justifyContent: { xs: 'flex-start', sm: 'center' },
+                  '&:hover': { bgcolor: '#FBE3DF' },
+                }}
+              >
+                Rejet COPEO · Sonelgaz + ADERFP
+              </Button>
+              <Button
+                onClick={setPresetChuSolvetech}
+                size="small"
+                startIcon={<VerifiedIcon sx={{ fontSize: 16 }} />}
+                sx={{
+                  bgcolor: NERO.successSoft,
+                  color: NERO.success,
+                  border: '1px solid rgba(31,122,85,0.28)',
+                  fontSize: 12,
+                  justifyContent: { xs: 'flex-start', sm: 'center' },
+                  '&:hover': { bgcolor: '#E2F2E9' },
+                }}
+              >
+                Succès Start-up · CHU Constantine + SolveTech
+              </Button>
+            </Stack>
+          </Stack>
+        </Box>
 
-            {isLoading && (
-              <div className="text-cyan-400 font-mono text-xs flex items-center space-x-2">
-                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping"></span>
-                <span>{stepMessage}</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {errorMsg && (
-          <div className="p-4 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs flex items-start space-x-3">
-            <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Erreur lors de l&apos;exécution :</p>
-              <p className="font-mono mt-1">{errorMsg}</p>
-            </div>
-          </div>
-        )}
-
-        {result && (
-          <div className="space-y-6">
-            {/* PANEL 1: COPEO SAFETY TRIAGE BANNER (15% BOUNDARY) */}
-            <section
-              className={`rounded-xl border p-5 transition-all shadow-xl ${
-                result.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING'
-                  ? 'bg-red-950/30 border-red-700/80 shadow-cyber-danger'
-                  : 'bg-emerald-950/30 border-emerald-700/80 shadow-cyber-success'
-              }`}
+        {/* ===== MAIN ===== */}
+        <Box component="main" sx={{ width: '100%', maxWidth: 1160, mx: 'auto', px: { xs: 2, sm: 3 }, py: { xs: 4, md: 6 }, flex: 1 }}>
+          {/* HERO */}
+          <Stack spacing={2} sx={{ mb: { xs: 4, md: 5 }, maxWidth: 860 }}>
+            <Box className="eyebrow">Audit multi-agents · Loi n° 23-12</Box>
+            <Typography
+              component="h1"
+              sx={{
+                fontSize: { xs: 36, sm: 46, md: 60 },
+                fontWeight: 900,
+                lineHeight: 1.02,
+                letterSpacing: '-0.035em',
+                color: NERO.ink,
+              }}
             >
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="flex items-start space-x-3.5">
-                  <div
-                    className={`h-12 w-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                      result.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING'
-                        ? 'bg-red-900/60 text-red-300 border border-red-600'
-                        : 'bg-emerald-900/60 text-emerald-300 border border-emerald-600'
-                    }`}
-                  >
-                    {result.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING' ? (
-                      <ShieldAlert className="h-7 w-7 text-red-400" />
-                    ) : (
-                      <ShieldCheck className="h-7 w-7 text-emerald-400" />
-                    )}
-                  </div>
+              Auditez votre dossier avant <Serif>la séance d&apos;ouverture.</Serif>
+            </Typography>
+            <Typography sx={{ color: NERO.muted, fontSize: { xs: 15.5, md: 18 }, maxWidth: 640 }}>
+              Trois agents spécialisés confrontent votre offre aux exigences du droit algérien des marchés publics :
+              ventilation des 3 enveloppes, audit arithmétique du BPU et simulation impitoyable de la commission COPEO.
+            </Typography>
 
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`text-xs px-2.5 py-0.5 rounded-full font-mono font-bold tracking-wider uppercase border ${
-                          result.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING'
-                            ? 'bg-red-950 text-red-300 border-red-700'
-                            : 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                        }`}
-                      >
-                        {result.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING'
-                          ? '🚨 CRITICAL_DISQUALIFICATION_WARNING'
-                          : '✅ CONFORME & QUALIFIÉ (COPEO SAFE)'}
-                      </span>
-                      <span className="text-xs font-mono text-slate-400">
-                        Seuil de sécurité COPEO : <span className="text-amber-400 font-semibold">15.0% Max</span>
-                      </span>
-                    </div>
+            <Stack direction="row" spacing={{ xs: 3, sm: 5 }} sx={{ pt: 1, flexWrap: 'wrap', rowGap: 1.5 }}>
+              {[
+                { n: '40%', l: 'des offres rejetées' },
+                { n: '3', l: 'agents SKILL.md' },
+                { n: '15%', l: 'seuil de sécurité' },
+              ].map((s) => (
+                <Box key={s.l}>
+                  <Typography sx={{ fontWeight: 900, fontSize: 22, color: NERO.ink, lineHeight: 1.1 }}>{s.n}</Typography>
+                  <Typography sx={{ fontSize: 12.5, color: NERO.muted, fontWeight: 600 }}>{s.l}</Typography>
+                </Box>
+              ))}
+            </Stack>
+          </Stack>
 
-                    <h2 className="text-lg font-bold text-white">
-                      {result.pass2Critic.status === 'CRITICAL_DISQUALIFICATION_WARNING'
-                        ? 'Défaut Éliminatoire Majeur Détecté — Risque de Rejet Imminent'
-                        : 'Dossier Conforme aux Prescriptions de la Loi n° 23-12'}
-                    </h2>
-                    <p className="text-xs text-slate-300 leading-relaxed max-w-4xl">
-                      {result.pass2Critic.copeoPresidentVerdict}
-                    </p>
-                  </div>
-                </div>
+          {/* CONTROL CARD */}
+          <Card sx={{ mb: 4 }}>
+            <CardContent sx={{ p: { xs: 2.25, sm: 3 } }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '5fr 4fr 3fr' }, gap: 2, alignItems: 'end' }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.75, flexWrap: 'wrap', rowGap: 0.75 }}>
+                    <Stack direction="row" spacing={0.75} alignItems="center">
+                      <DescriptionIcon sx={{ fontSize: 15, color: NERO.tealDeep }} />
+                      <Typography sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.muted }}>
+                        1. Cahier des charges
+                      </Typography>
+                    </Stack>
 
-                {/* GAUGE & METRICS */}
-                <div className="flex items-center space-x-6 bg-slate-950/60 border border-slate-800 p-3.5 rounded-lg flex-shrink-0">
-                  <div className="text-center">
-                    <div className="text-xs uppercase font-mono text-slate-400">Risque Rejet</div>
-                    <div
-                      className={`text-2xl font-black font-mono ${
-                        result.pass2Critic.eliminationRiskPercent >= 15 ? 'text-red-400' : 'text-emerald-400'
-                      }`}
+                    <ToggleButtonGroup
+                      exclusive
+                      size="small"
+                      value={inputTab}
+                      onChange={(_, v) => {
+                        if (!v) return;
+                        setInputTab(v);
+                        setIsCustomMode(v === 'pdf');
+                        if (v === 'sample') {
+                          setUploadedFileName(null);
+                          setCustomText('');
+                        }
+                      }}
+                      sx={{
+                        '& .MuiToggleButton-root': {
+                          py: 0.25,
+                          px: 1,
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          textTransform: 'none',
+                          color: NERO.muted,
+                          border: `1px solid ${NERO.line}`,
+                          '&.Mui-selected': { bgcolor: '#EAF3F8', color: NERO.tealDeep, borderColor: 'rgba(53,111,143,0.35)' },
+                        },
+                      }}
                     >
-                      {result.pass2Critic.eliminationRiskPercent}%
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-mono">
-                      {result.pass2Critic.eliminationRiskPercent >= 15 ? '≥ 15% (Alerte)' : '< 15% (Sécurisé)'}
-                    </div>
-                  </div>
+                      <ToggleButton value="sample">
+                        <GridViewIcon sx={{ fontSize: 13, mr: 0.5 }} /> Modèles
+                      </ToggleButton>
+                      <ToggleButton value="pdf">
+                        <UploadFileIcon sx={{ fontSize: 13, mr: 0.5 }} /> PDF / TXT
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+                  </Stack>
 
-                  <div className="w-px h-10 bg-slate-800" />
-
-                  <div className="text-center">
-                    <div className="text-xs uppercase font-mono text-slate-400">Note Technique</div>
-                    <div className="text-lg font-bold font-mono text-cyan-400">
-                      {result.pass1Result.technicalRubric.minEliminatoryScore}
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-mono">Seuil Éliminatoire</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* FATAL TRAPS LIST OR STARTUP EXEMPTIONS */}
-              {((result?.pass2Critic?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || []).length > 0) && (
-                <div className="mt-4 pt-4 border-t border-red-900/40 space-y-2">
-                  <div className="text-xs font-bold text-red-300 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Flame className="h-3.5 w-3.5 text-red-400" />
-                    <span>Pièges Fatals Relevés par le Président de la COPEO (Pass 2 Critic) :</span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {(result?.pass2Critic?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || []).map((trap: any, idx: number) => {
-                      const trapId = typeof trap === 'string' ? `TRAP-0${idx + 1}` : (trap?.trapId || `TRAP-0${idx + 1}`);
-                      const severity = typeof trap === 'string' ? 'FATAL' : (trap?.severity || 'FATAL');
-                      const cause = typeof trap === 'string' ? trap : (trap?.cause || String(trap));
-                      const legalBasis = typeof trap !== 'string' && trap?.legalBasis ? trap.legalBasis : 'Loi n° 23-12 Art. 47 & 72';
-                      const correctionRequired = typeof trap !== 'string' && trap?.correctionRequired ? trap.correctionRequired : 'Régulariser impérativement la pièce ou rectifier l\'addition avant l\'ouverture des plis.';
-
-                      return (
-                        <div
-                          key={idx}
-                          className="bg-red-950/40 border border-red-800/80 rounded-lg p-3 text-xs space-y-1"
-                        >
-                          <div className="flex items-center justify-between text-red-300 font-semibold">
-                            <span>⚠️ {trapId}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/60 font-mono">
-                              {severity}
-                            </span>
-                          </div>
-                          <p className="text-red-200">{cause}</p>
-                          <p className="text-[11px] text-red-300/80 italic">Loi : {legalBasis}</p>
-                          <div className="pt-1 text-[11px] text-amber-300 font-medium">
-                            ➜ Action corrective : {correctionRequired}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {((result?.pass2Critic?.regulatoryExemptionsApplied || []).length > 0) && (
-                <div className="mt-4 pt-4 border-t border-emerald-900/40 space-y-2">
-                  <div className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Mesures Dérogatoires & Dispenses Légales Activées (Loi n° 23-12 Art. 87) :</span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {(result?.pass2Critic?.regulatoryExemptionsApplied || []).map((ex, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-emerald-950/40 border border-emerald-800/80 rounded-lg p-3 text-xs space-y-1"
-                      >
-                        <div className="font-semibold text-emerald-300">★ {ex.exemptionTitle}</div>
-                        <p className="text-[11px] text-emerald-400/90 font-mono">{ex.legalBasis}</p>
-                        <p className="text-slate-300 text-[11px]">{ex.impact}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </section>
-
-            {/* 2-COLUMN SECTION: ENVELOPES (LEFT) & BPU MATH (RIGHT) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* PANEL 2: LES 3 ENVELOPPES RÉGLEMENTAIRES (LOI 23-12 ART. 47) */}
-              <section className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                  <div className="flex items-center space-x-2">
-                    <Layers className="h-4 w-4 text-cyan-400" />
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                      Les 3 Enveloppes Réglementaires
-                    </h3>
-                  </div>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    Loi n° 23-12 Art. 47
-                  </span>
-                </div>
-
-                {/* ENVELOPE TABS */}
-                <div className="flex border-b border-slate-800 mt-3 text-xs font-medium">
-                  <button
-                    onClick={() => setActiveEnvelope('ENVELOPE_A')}
-                    className={`py-2 px-3 border-b-2 flex items-center space-x-1.5 transition-colors ${
-                      activeEnvelope === 'ENVELOPE_A'
-                        ? 'border-cyan-400 text-cyan-400 bg-cyan-950/20'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <span>1. Candidature</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 font-mono">
-                      {result.pass1Result.envelopes.envelopeA.items.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveEnvelope('ENVELOPE_B')}
-                    className={`py-2 px-3 border-b-2 flex items-center space-x-1.5 transition-colors ${
-                      activeEnvelope === 'ENVELOPE_B'
-                        ? 'border-cyan-400 text-cyan-400 bg-cyan-950/20'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <span>2. Offre Technique</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 font-mono">
-                      {result.pass1Result.envelopes.envelopeB.items.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveEnvelope('ENVELOPE_C')}
-                    className={`py-2 px-3 border-b-2 flex items-center space-x-1.5 transition-colors ${
-                      activeEnvelope === 'ENVELOPE_C'
-                        ? 'border-cyan-400 text-cyan-400 bg-cyan-950/20'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <span>3. Offre Financière</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 font-mono">
-                      {result.pass1Result.envelopes.envelopeC.items.length}
-                    </span>
-                  </button>
-                </div>
-
-                {/* ACTIVE ENVELOPE CONTENT */}
-                <div className="mt-4 space-y-3 flex-1">
-                  {(() => {
-                    const currentEnv =
-                      activeEnvelope === 'ENVELOPE_A'
-                        ? result.pass1Result.envelopes.envelopeA
-                        : activeEnvelope === 'ENVELOPE_B'
-                        ? result.pass1Result.envelopes.envelopeB
-                        : result.pass1Result.envelopes.envelopeC;
-
-                    return (
-                      <>
-                        <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
-                          <span className="font-semibold text-slate-200">{currentEnv.title}</span>
-                          <span className="text-emerald-400 font-mono font-medium">
-                            Conformité : {Math.round(currentEnv.complianceScore)}%
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 italic mb-2">{currentEnv.subtitle}</p>
-
-                        <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
-                          {currentEnv.items.map((item) => (
-                            <div
-                              key={item.id}
-                              className={`p-2.5 rounded-lg border text-xs flex items-start justify-between gap-3 ${
-                                item.status === 'COMPLIANT'
-                                  ? 'bg-slate-950/70 border-slate-800'
-                                  : item.status === 'EXEMPTED_BY_LAW'
-                                  ? 'bg-emerald-950/20 border-emerald-800/60'
-                                  : 'bg-red-950/30 border-red-800/80'
-                              }`}
-                            >
-                              <div className="space-y-0.5">
-                                <div className="flex items-center space-x-2">
-                                  <span className="font-mono text-[10px] text-slate-500 font-bold">
-                                    {item.id}
-                                  </span>
-                                  <span className="font-medium text-slate-100">{item.label}</span>
-                                </div>
-                                <div className="text-[11px] text-slate-400">{item.details}</div>
-                                <div className="text-[10px] font-mono text-cyan-400/80">
-                                  {item.legalReference}
-                                </div>
-                              </div>
-
-                              <div className="flex-shrink-0">
-                                {item.status === 'COMPLIANT' && (
-                                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-mono flex items-center space-x-1">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    <span>CONFORME</span>
-                                  </span>
-                                )}
-                                {item.status === 'EXEMPTED_BY_LAW' && (
-                                  <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-mono flex items-center space-x-1">
-                                    <Sparkles className="h-3 w-3" />
-                                    <span>DISPENSE ART. 87</span>
-                                  </span>
-                                )}
-                                {item.status === 'NON_COMPLIANT' && (
-                                  <span className="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800 text-[10px] font-mono flex items-center space-x-1">
-                                    <XCircle className="h-3 w-3" />
-                                    <span>NON CONFORME</span>
-                                  </span>
-                                )}
-                                {item.status === 'WARNING' && (
-                                  <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-mono flex items-center space-x-1">
-                                    <AlertTriangle className="h-3 w-3" />
-                                    <span>VIGILANCE</span>
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              </section>
-
-              {/* PANEL 3: AUDIT ARITHMÉTIQUE BPU & DQE (DZD) */}
-              <section className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                  <div className="flex items-center space-x-2">
-                    <Calculator className="h-4 w-4 text-emerald-400" />
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                      Audit Arithmétique BPU & DQE
-                    </h3>
-                  </div>
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                    Monnaie : DZD (DA)
-                  </span>
-                </div>
-
-                {result.bpuAudit.hasErrors ? (
-                  <div className="mt-3 p-2.5 rounded-lg bg-red-950/60 border border-red-800 text-xs text-red-200 flex items-start space-x-2">
-                    <AlertTriangle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold">Anomalie financière détectée : </span>
-                      <span>Écart de {Math.abs(result.bpuAudit.grandDiscrepancyHT).toLocaleString('fr-DZ')} DA entre montant déclaré et calculé.</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800 text-xs text-emerald-200 flex items-center space-x-2">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
-                    <span>Intégrité arithmétique validée (zéro écart de calcul).</span>
-                  </div>
-                )}
-
-                {/* BPU ITEMS TABLE */}
-                <div className="mt-3 flex-1 overflow-x-auto">
-                  <table className="w-full text-left text-xs font-mono">
-                    <thead>
-                      <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase">
-                        <th className="py-2 pr-2">Code</th>
-                        <th className="py-2 pr-2">Qté x P.U HT</th>
-                        <th className="py-2 pr-2">Déclaré HT</th>
-                        <th className="py-2 pr-2">Calculé HT</th>
-                        <th className="py-2 text-right">TVA</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60">
-                      {result.bpuAudit.lines.map((l) => (
-                        <tr
-                          key={l.code}
-                          className={`hover:bg-slate-800/30 ${
-                            l.hasDiscrepancy ? 'bg-red-950/30 font-semibold' : ''
-                          }`}
-                        >
-                          <td className="py-2 pr-2">
-                            <span className={l.hasDiscrepancy ? 'text-red-400 font-bold' : 'text-slate-300'}>
-                              {l.code}
-                            </span>
-                            <div className="text-[10px] text-slate-400 truncate max-w-[120px]" title={l.designation}>
-                              {l.designation}
-                            </div>
-                          </td>
-                          <td className="py-2 pr-2 text-slate-300">
-                            {l.qty} x {(l.unitPriceHT / 1000).toLocaleString('fr-DZ')}k
-                          </td>
-                          <td className="py-2 pr-2 text-slate-400">
-                            {(l.claimedTotalHT / 1000).toLocaleString('fr-DZ')}k
-                          </td>
-                          <td className="py-2 pr-2">
-                            <span
-                              className={
-                                l.hasDiscrepancy ? 'text-red-400 font-black' : 'text-emerald-400'
-                              }
-                            >
-                              {(l.computedTotalHT / 1000).toLocaleString('fr-DZ')}k
-                            </span>
-                            {l.hasDiscrepancy && (
-                              <span className="block text-[9px] text-red-400">
-                                ÉCART {l.discrepancyHT < 0 ? '-' : '+'}{Math.abs(l.discrepancyHT).toLocaleString('fr-DZ')} DA
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2 text-right text-slate-300">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px]">
-                              {l.tvaRate}%
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* TOTALS SUMMARY */}
-                <div className="mt-4 pt-3 border-t border-slate-800 space-y-1.5 text-xs font-mono">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Total HT Déclaré :</span>
-                    <span>{formatDZD(result.bpuAudit.claimedGrandTotalHT)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-200 font-bold">
-                    <span>Total HT Calculé :</span>
-                    <span className={result.bpuAudit.hasErrors ? 'text-red-400' : 'text-emerald-400'}>
-                      {formatDZD(result.bpuAudit.computedGrandTotalHT)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-slate-400 text-[11px]">
-                    <span>TVA (9% Solaire & 19% Standard) :</span>
-                    <span>{formatDZD(result.bpuAudit.totalTVA)}</span>
-                  </div>
-                  <div className="flex justify-between text-white font-black text-sm pt-1 border-t border-slate-800">
-                    <span className="text-cyan-400">Total Général TTC :</span>
-                    <span className="text-cyan-400">{formatDZD(result.bpuAudit.grandTotalTTC)}</span>
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            {/* PANEL 4: MÉMOIRE TECHNIQUE JUSTIFICATIF & TRACE DE RAISONNEMENT GEMMA 4 */}
-            <section className="bg-slate-900/70 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-3">
-                <div className="flex items-center space-x-2">
-                  <FileCode className="h-5 w-5 text-cyan-400" />
-                  <div>
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                      Mémoire Technique Justificatif
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Rédigé sur-mesure par Gemma 4 selon les barèmes de notation de la Loi n° 23-12
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-2 no-print">
-                  <button
-                    onClick={copyMemoireToClipboard}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center space-x-1.5"
-                  >
-                    <Copy className="h-3.5 w-3.5 text-cyan-400" />
-                    <span>{isCopied ? 'Copié !' : 'Copier'}</span>
-                  </button>
-
-                  <button
-                    onClick={handlePrint}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center space-x-1.5"
-                  >
-                    <Printer className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Imprimer / PDF</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* FORMATTED MÉMOIRE DISPLAY */}
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-5 font-mono text-xs text-slate-300 leading-relaxed max-h-[380px] overflow-y-auto whitespace-pre-wrap select-text">
-                {result.pass1Result.memoireTechnique.fullMarkdown}
-              </div>
-
-              {/* EXPANDABLE TERMINAL DRAWER: GEMMA 4 THOUGHT TRACE & ACTIVE SKILLS */}
-              <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950/90 no-print">
-                <button
-                  type="button"
-                  onClick={() => setIsTerminalExpanded(!isTerminalExpanded)}
-                  className="w-full px-4 py-3 bg-slate-900/90 hover:bg-slate-900 flex items-center justify-between text-xs font-mono text-slate-300 transition-colors"
-                >
-                  <div className="flex items-center space-x-2">
-                    <Terminal className="h-4 w-4 text-cyan-400" />
-                    <span className="font-semibold text-cyan-300">
-                      TERMINAL AGENT : Trace de Raisonnement Gemma 4 (thought: true) & Fichiers SKILL.md
-                    </span>
-                    <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 text-[10px]">
-                      {result.executionMode}
-                    </span>
-                  </div>
-                  {isTerminalExpanded ? (
-                    <ChevronUp className="h-4 w-4 text-slate-400" />
+                  {inputTab === 'pdf' || isCustomMode ? (
+                    <DocumentUploader
+                      extractedText={customText}
+                      onTextExtracted={(text, fileName) => {
+                        setCustomText(text);
+                        if (fileName) setUploadedFileName(fileName);
+                        setIsCustomMode(true);
+                      }}
+                      activeFileName={uploadedFileName}
+                      onClearFile={() => {
+                        setUploadedFileName(null);
+                        setCustomText('');
+                        setIsCustomMode(false);
+                        setInputTab('sample');
+                      }}
+                    />
                   ) : (
-                    <ChevronDown className="h-4 w-4 text-slate-400" />
+                    <TextField
+                      select
+                      fullWidth
+                      value={selectedTenderId}
+                      onChange={(e) => setSelectedTenderId(e.target.value)}
+                      SelectProps={{ MenuProps: { PaperProps: { sx: { maxWidth: 460 } } } }}
+                      sx={{ '& .MuiSelect-select': { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }}
+                    >
+                      {tenders.map((t) => (
+                        <MenuItem key={t.id} value={t.id} sx={{ fontSize: 12.5 }}>
+                          [{t.reference}] {t.title} — {t.authority}
+                        </MenuItem>
+                      ))}
+                    </TextField>
                   )}
-                </button>
+                </Box>
 
-                {isTerminalExpanded && (
-                  <div className="p-4 space-y-4 border-t border-slate-800 font-mono text-xs">
-                    {/* ACTIVE SKILLS LIST */}
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center space-x-1.5">
-                        <BookOpen className="h-3.5 w-3.5 text-amber-400" />
-                        <span>Fichiers de Compétences Actifs (Modular SKILL.md) :</span>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                        {result.activeSkillsUsed.map((skill, i) => (
-                          <div
-                            key={i}
-                            className="p-2.5 rounded bg-slate-900 border border-slate-800 text-[11px] space-y-1"
-                          >
-                            <div className="text-amber-400 font-semibold flex items-center justify-between">
-                              <span>skills/{skill.name}/SKILL.md</span>
-                              <span className="text-[9px] text-slate-500">v{skill.version}</span>
-                            </div>
-                            <div className="text-slate-400 text-[10px] line-clamp-2">
-                              {skill.description}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                <Box sx={{ minWidth: 0 }}>
+                  <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.75 }}>
+                    <BusinessIcon sx={{ fontSize: 15, color: NERO.success }} />
+                    <Typography sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.muted }}>
+                      2. Entreprise soumissionnaire
+                    </Typography>
+                  </Stack>
+                  <TextField
+                    select
+                    fullWidth
+                    value={selectedProfileId}
+                    onChange={(e) => setSelectedProfileId(e.target.value)}
+                    sx={{ '& .MuiSelect-select': { fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }}
+                  >
+                    {profiles.map((p) => (
+                      <MenuItem key={p.id} value={p.id} sx={{ fontSize: 12.5 }}>
+                        {p.name} ({p.type} — {p.wilaya})
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Box>
 
-                    {/* GEMMA 4 THOUGHT TRACE */}
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 mb-2 flex items-center space-x-1.5">
-                        <Cpu className="h-3.5 w-3.5 text-cyan-400" />
-                        <span>Trace Interne Chain-of-Thought (parts.find(p =&gt; p.thought === true)) :</span>
-                      </div>
-                      <pre className="p-3.5 rounded bg-black border border-slate-800 text-cyan-200/90 text-[11px] leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap">
-                        {result.thoughtTrace}
-                      </pre>
-                    </div>
-                  </div>
+                <Button
+                  onClick={() => runAudit(selectedTenderId, selectedProfileId)}
+                  disabled={isLoading}
+                  fullWidth
+                  endIcon={!isLoading ? <ArrowForwardIcon sx={{ fontSize: 18 }} /> : undefined}
+                  sx={{
+                    minHeight: 44,
+                    background: isLoading ? '#E4E0D7' : `linear-gradient(135deg, ${NERO.teal}, ${NERO.tealDeep})`,
+                    color: isLoading ? NERO.muted : '#fff',
+                    fontSize: 13,
+                    fontWeight: 800,
+                    boxShadow: isLoading ? 'none' : '0 12px 26px -12px rgba(53,111,143,0.6)',
+                    '&:hover': { background: isLoading ? '#E4E0D7' : `linear-gradient(135deg, ${NERO.teal}, #2c5f7b)`, transform: 'translateY(-1px)' },
+                    '&.Mui-disabled': { background: '#E4E0D7', color: NERO.muted },
+                  }}
+                >
+                  {isLoading ? (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <CircularProgress size={15} sx={{ color: NERO.muted }} />
+                      <span>Audit en cours...</span>
+                    </Stack>
+                  ) : (
+                    "Lancer l'audit"
+                  )}
+                </Button>
+              </Box>
+
+              <Divider sx={{ my: 2.25 }} />
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: NERO.muted }}>Soumissionnaire actif :</Typography>
+                  <Chip size="small" label={`RC: ${currentProfile.rc}`} sx={{ bgcolor: NERO.paperDeep, fontFamily: MONO, fontSize: 10.5 }} />
+                  <Chip size="small" label={`NIF: ${currentProfile.nif}`} sx={{ bgcolor: NERO.paperDeep, fontFamily: MONO, fontSize: 10.5 }} />
+                  <Chip size="small" label={`${currentProfile.engineersCount} ingénieurs`} sx={{ bgcolor: NERO.paperDeep, fontSize: 10.5 }} />
+                  {currentProfile.startupLabel && (
+                    <Chip
+                      size="small"
+                      icon={<AutoAwesomeIcon sx={{ fontSize: 13 }} />}
+                      label="Start-up labellisée"
+                      sx={{ bgcolor: '#EAF3F8', color: NERO.tealDeep, border: `1px solid rgba(53,111,143,0.3)`, fontWeight: 800, fontSize: 10.5 }}
+                    />
+                  )}
+                  {!isCustomMode && inputTab === 'sample' && (
+                    <Chip size="small" label={currentTender.reference} sx={{ bgcolor: 'transparent', border: `1px dashed ${NERO.line}`, fontFamily: MONO, fontSize: 10.5, color: NERO.muted }} />
+                  )}
+                  {uploadedFileName && (
+                    <Chip size="small" label={uploadedFileName} sx={{ bgcolor: NERO.successSoft, color: NERO.success, border: '1px solid rgba(31,122,85,0.25)', fontFamily: MONO, fontSize: 10.5 }} />
+                  )}
+                </Stack>
+
+                {isLoading && (
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ color: NERO.tealDeep }}>
+                    <CircularProgress size={12} sx={{ color: NERO.tealDeep }} />
+                    <Typography sx={{ fontFamily: MONO, fontSize: 11 }}>{stepMessage}</Typography>
+                  </Stack>
                 )}
-              </div>
-            </section>
-          </div>
-        )}
-      </main>
+              </Stack>
 
-      {/* FOOTER */}
-      <footer className="border-t border-slate-800 bg-slate-950/80 py-4 px-4 text-center text-xs text-slate-500 font-mono no-print">
-        <p>
-          SoumissionAI-DZ — Conforme à la Loi n° 23-12 du 5 août 2023 fixant les règles des marchés publics en Algérie.
-          Sous licence Apache-2.0. Développé pour la communauté Open-Source Algérienne.
-        </p>
-      </footer>
-    </div>
+              {isLoading && <LinearProgress sx={{ mt: 2, borderRadius: 999, height: 3, bgcolor: NERO.paperDeep }} />}
+            </CardContent>
+          </Card>
+
+          {errorMsg && (
+            <Alert
+              severity="error"
+              icon={<WarningAmberIcon />}
+              sx={{ mb: 3, borderRadius: 3, bgcolor: NERO.dangerSoft, color: NERO.danger, border: '1px solid rgba(179,38,30,0.25)', '& .MuiAlert-icon': { color: NERO.danger } }}
+            >
+              <Typography sx={{ fontWeight: 800, fontSize: 13 }}>Erreur lors de l&apos;exécution</Typography>
+              <Typography sx={{ fontFamily: MONO, fontSize: 12 }}>{errorMsg}</Typography>
+            </Alert>
+          )}
+
+          {result && (
+            <Stack spacing={3.5}>
+              {/* VERDICT CARD */}
+              <Card
+                sx={{
+                  bgcolor: isCritical ? '#FCF1EF' : NERO.successSoft,
+                  border: `1px solid ${isCritical ? 'rgba(179,38,30,0.25)' : 'rgba(31,122,85,0.22)'}`,
+                  boxShadow: isCritical ? '0 24px 50px -34px rgba(179,38,30,0.55)' : '0 24px 50px -34px rgba(31,122,85,0.45)',
+                }}
+              >
+                <CardContent sx={{ p: { xs: 2.5, sm: 3.25 } }}>
+                  <Stack direction={{ xs: 'column', lg: 'row' }} spacing={{ xs: 2.5, lg: 4 }} alignItems={{ xs: 'flex-start', lg: 'center' }} justifyContent="space-between">
+                    <Stack direction="row" spacing={2} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                      <Box
+                        sx={{
+                          width: 56,
+                          height: 56,
+                          borderRadius: 3,
+                          flexShrink: 0,
+                          display: 'grid',
+                          placeItems: 'center',
+                          bgcolor: isCritical ? 'rgba(179,38,30,0.1)' : 'rgba(31,122,85,0.1)',
+                          border: `1px solid ${isCritical ? 'rgba(179,38,30,0.3)' : 'rgba(31,122,85,0.28)'}`,
+                        }}
+                      >
+                        {isCritical ? <GppMaybeIcon sx={{ color: NERO.danger, fontSize: 30 }} /> : <VerifiedIcon sx={{ color: NERO.success, fontSize: 30 }} />}
+                      </Box>
+
+                      <Box sx={{ minWidth: 0 }}>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 0.75, mb: 0.75 }}>
+                          <Chip
+                            size="small"
+                            label={isCritical ? 'CRITICAL_DISQUALIFICATION_WARNING' : 'CONFORME & QUALIFIÉ (COPEO SAFE)'}
+                            sx={{
+                              bgcolor: isCritical ? 'rgba(179,38,30,0.12)' : 'rgba(31,122,85,0.12)',
+                              color: isCritical ? NERO.danger : NERO.success,
+                              border: `1px solid ${isCritical ? 'rgba(179,38,30,0.3)' : 'rgba(31,122,85,0.3)'}`,
+                              fontFamily: MONO,
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              letterSpacing: '.03em',
+                            }}
+                          />
+                          <Typography sx={{ fontFamily: MONO, fontSize: 11, color: NERO.muted }}>
+                            Seuil COPEO : <Box component="span" sx={{ color: NERO.warning, fontWeight: 800 }}>15.0% max</Box>
+                          </Typography>
+                        </Stack>
+
+                        <Typography sx={{ fontSize: { xs: 17, sm: 20 }, fontWeight: 800, color: NERO.ink, letterSpacing: '-0.01em', mb: 0.5 }}>
+                          {isCritical ? 'Défaut éliminatoire majeur détecté — rejet imminent' : 'Dossier conforme aux prescriptions de la Loi n° 23-12'}
+                        </Typography>
+                        <Typography sx={{ fontSize: 13, color: NERO.muted, lineHeight: 1.65, maxWidth: 620 }}>
+                          {result.pass2Critic.copeoPresidentVerdict}
+                        </Typography>
+                      </Box>
+                    </Stack>
+
+                    <Stack direction="row" spacing={3} alignItems="center" sx={{ flexShrink: 0, width: { xs: '100%', lg: 'auto' }, justifyContent: { xs: 'space-around', lg: 'flex-start' } }}>
+                      <RiskGauge value={result.pass2Critic.eliminationRiskPercent} />
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography sx={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.muted }}>
+                          Note technique
+                        </Typography>
+                        <Typography sx={{ fontFamily: MONO, fontWeight: 800, fontSize: 17, color: NERO.tealDeep, mt: 0.5 }}>
+                          {result.pass1Result.technicalRubric.minEliminatoryScore}
+                        </Typography>
+                        <Typography sx={{ fontSize: 9.5, color: NERO.muted }}>Seuil éliminatoire</Typography>
+                      </Box>
+                    </Stack>
+                  </Stack>
+
+                  {/* FATAL TRAPS */}
+                  {fatalTraps.length > 0 && (
+                    <Box sx={{ mt: 2.5, pt: 2.5, borderTop: `1px dashed rgba(179,38,30,0.3)` }}>
+                      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 1.5 }}>
+                        <WhatshotIcon sx={{ fontSize: 16, color: NERO.danger }} />
+                        <Typography sx={{ fontSize: 11, fontWeight: 900, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.danger }}>
+                          Pièges fatals relevés par le président de la COPEO
+                        </Typography>
+                      </Stack>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
+                        {fatalTraps.map((trap: any, idx: number) => {
+                          const trapId = typeof trap === 'string' ? `TRAP-0${idx + 1}` : trap?.trapId || `TRAP-0${idx + 1}`;
+                          const severity = typeof trap === 'string' ? 'FATAL' : trap?.severity || 'FATAL';
+                          const cause = typeof trap === 'string' ? trap : trap?.cause || String(trap);
+                          const legalBasis =
+                            typeof trap !== 'string' && trap?.legalBasis ? trap.legalBasis : 'Loi n° 23-12 Art. 47 & 72';
+                          const correctionRequired =
+                            typeof trap !== 'string' && trap?.correctionRequired
+                              ? trap.correctionRequired
+                              : "Régulariser impérativement la pièce ou rectifier l'addition avant l'ouverture des plis.";
+
+                          return (
+                            <Box
+                              key={`${trapId}-${idx}`}
+                              sx={{
+                                bgcolor: 'rgba(255,255,255,0.7)',
+                                border: '1px solid rgba(179,38,30,0.22)',
+                                borderRadius: 3,
+                                p: 2,
+                              }}
+                            >
+                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.75 }}>
+                                <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: NERO.danger, fontFamily: MONO }}>{trapId}</Typography>
+                                <Chip size="small" label={severity} sx={{ bgcolor: 'rgba(179,38,30,0.12)', color: NERO.danger, fontFamily: MONO, fontSize: 9.5, height: 20 }} />
+                              </Stack>
+                              <Typography sx={{ fontSize: 12.5, color: NERO.ink, fontWeight: 600, mb: 0.75 }}>{cause}</Typography>
+                              <Typography sx={{ fontSize: 11, color: NERO.muted, fontStyle: 'italic', mb: 0.75 }}>Loi : {legalBasis}</Typography>
+                              <Typography sx={{ fontSize: 11.5, color: NERO.warning, fontWeight: 700 }}>
+                                → Action corrective : {correctionRequired}
+                              </Typography>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* EXEMPTIONS */}
+                  {exemptions.length > 0 && (
+                    <Box sx={{ mt: 2.5, pt: 2.5, borderTop: `1px dashed rgba(31,122,85,0.3)` }}>
+                      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 1.5 }}>
+                        <AutoAwesomeIcon sx={{ fontSize: 16, color: NERO.success }} />
+                        <Typography sx={{ fontSize: 11, fontWeight: 900, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.success }}>
+                          Dispenses légales activées (Loi n° 23-12 Art. 87)
+                        </Typography>
+                      </Stack>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
+                        {exemptions.map((ex: any, idx: number) => (
+                          <Box key={idx} sx={{ bgcolor: 'rgba(255,255,255,0.7)', border: '1px solid rgba(31,122,85,0.2)', borderRadius: 3, p: 2 }}>
+                            <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: NERO.success, mb: 0.5 }}>★ {ex.exemptionTitle}</Typography>
+                            <Typography sx={{ fontSize: 10.5, color: NERO.muted, fontFamily: MONO, mb: 0.5 }}>{ex.legalBasis}</Typography>
+                            <Typography sx={{ fontSize: 11.5, color: NERO.ink }}>{ex.impact}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* ENVELOPES + BPU */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '7fr 5fr' }, gap: 3 }}>
+                {/* ENVELOPES */}
+                <Card sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <CardContent sx={{ p: { xs: 2.25, sm: 3 }, display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <LayersIcon sx={{ fontSize: 18, color: NERO.tealDeep }} />
+                        <Typography sx={{ fontSize: 12.5, fontWeight: 900, letterSpacing: '.06em', textTransform: 'uppercase', color: NERO.ink }}>
+                          Les 3 enveloppes réglementaires
+                        </Typography>
+                      </Stack>
+                      <Typography sx={{ fontFamily: MONO, fontSize: 10.5, color: NERO.muted }}>Loi 23-12 · Art. 47</Typography>
+                    </Stack>
+
+                    <Tabs
+                      value={activeEnvelope}
+                      onChange={(_, v) => setActiveEnvelope(v)}
+                      variant="scrollable"
+                      scrollButtons={false}
+                      sx={{ borderBottom: `1px solid ${NERO.line}`, minHeight: 40, '& .MuiTab-root': { minHeight: 40, fontSize: 12.5 } }}
+                    >
+                      <Tab
+                        value="ENVELOPE_A"
+                        label={
+                          <Stack direction="row" spacing={0.75} alignItems="center">
+                            <span>1. Candidature</span>
+                            <Chip size="small" label={result.pass1Result.envelopes.envelopeA.items.length} sx={{ height: 18, fontSize: 10, bgcolor: NERO.paperDeep }} />
+                          </Stack>
+                        }
+                      />
+                      <Tab
+                        value="ENVELOPE_B"
+                        label={
+                          <Stack direction="row" spacing={0.75} alignItems="center">
+                            <span>2. Offre technique</span>
+                            <Chip size="small" label={result.pass1Result.envelopes.envelopeB.items.length} sx={{ height: 18, fontSize: 10, bgcolor: NERO.paperDeep }} />
+                          </Stack>
+                        }
+                      />
+                      <Tab
+                        value="ENVELOPE_C"
+                        label={
+                          <Stack direction="row" spacing={0.75} alignItems="center">
+                            <span>3. Offre financière</span>
+                            <Chip size="small" label={result.pass1Result.envelopes.envelopeC.items.length} sx={{ height: 18, fontSize: 10, bgcolor: NERO.paperDeep }} />
+                          </Stack>
+                        }
+                      />
+                    </Tabs>
+
+                    {currentEnv && (
+                      <Box sx={{ mt: 2, flex: 1 }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.25 }}>
+                          <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: NERO.ink }}>{currentEnv.title}</Typography>
+                          <Typography sx={{ fontSize: 12, fontWeight: 800, fontFamily: MONO, color: NERO.success }}>
+                            {Math.round(currentEnv.complianceScore)}% conforme
+                          </Typography>
+                        </Stack>
+                        <Typography sx={{ fontSize: 11.5, fontStyle: 'italic', color: NERO.muted, mb: 1.75 }}>{currentEnv.subtitle}</Typography>
+
+                        <Stack spacing={1.25} sx={{ maxHeight: 360, overflowY: 'auto', pr: 0.75 }}>
+                          {currentEnv.items.map((item) => (
+                            <Box
+                              key={item.id}
+                              sx={{
+                                p: 1.75,
+                                borderRadius: 2.5,
+                                border: `1px solid ${item.status === 'NON_COMPLIANT' ? 'rgba(179,38,30,0.22)' : item.status === 'EXEMPTED_BY_LAW' ? 'rgba(53,111,143,0.2)' : NERO.line}`,
+                                bgcolor: item.status === 'NON_COMPLIANT' ? 'rgba(253,238,235,0.65)' : item.status === 'EXEMPTED_BY_LAW' ? 'rgba(234,243,248,0.5)' : '#fff',
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                justifyContent: 'space-between',
+                                gap: 1.5,
+                              }}
+                            >
+                              <Box sx={{ minWidth: 0 }}>
+                                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.25 }}>
+                                  <Typography sx={{ fontFamily: MONO, fontSize: 10, fontWeight: 800, color: NERO.muted }}>{item.id}</Typography>
+                                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: NERO.ink }}>{item.label}</Typography>
+                                </Stack>
+                                <Typography sx={{ fontSize: 11.5, color: NERO.muted, mb: 0.25 }}>{item.details}</Typography>
+                                <Typography sx={{ fontSize: 10, fontFamily: MONO, color: NERO.tealDeep }}>{item.legalReference}</Typography>
+                              </Box>
+                              <Box sx={{ flexShrink: 0 }}>
+                                <StatusChip status={item.status} />
+                              </Box>
+                            </Box>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* BPU AUDIT */}
+                <Card sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <CardContent sx={{ p: { xs: 2.25, sm: 3 }, display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <CalculateIcon sx={{ fontSize: 18, color: NERO.success }} />
+                        <Typography sx={{ fontSize: 12.5, fontWeight: 900, letterSpacing: '.06em', textTransform: 'uppercase', color: NERO.ink }}>
+                          Audit BPU & DQE
+                        </Typography>
+                      </Stack>
+                      <Chip size="small" label="DZD" sx={{ bgcolor: NERO.paperDeep, fontFamily: MONO, fontSize: 10 }} />
+                    </Stack>
+
+                    {result.bpuAudit.hasErrors ? (
+                      <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ p: 1.5, bgcolor: NERO.dangerSoft, border: '1px solid rgba(179,38,30,0.22)', borderRadius: 2.5 }}>
+                        <WarningAmberIcon sx={{ color: NERO.danger, fontSize: 18, mt: 0.1 }} />
+                        <Typography sx={{ fontSize: 11.5, color: NERO.danger }}>
+                          <Box component="span" sx={{ fontWeight: 800 }}>Anomalie financière : </Box>
+                          écart de {Math.abs(result.bpuAudit.grandDiscrepancyHT).toLocaleString('fr-DZ')} DA entre montant déclaré et calculé.
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 1.5, bgcolor: NERO.successSoft, border: '1px solid rgba(31,122,85,0.2)', borderRadius: 2.5 }}>
+                        <CheckCircleOutlineIcon sx={{ color: NERO.success, fontSize: 18 }} />
+                        <Typography sx={{ fontSize: 11.5, color: NERO.success, fontWeight: 600 }}>
+                          Intégrité arithmétique validée (zéro écart).
+                        </Typography>
+                      </Stack>
+                    )}
+
+                    <TableContainer sx={{ mt: 2, flex: 1 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            {['Code', 'Qté × P.U HT', 'Déclaré', 'Calculé', 'TVA'].map((h) => (
+                              <TableCell key={h} sx={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase', color: NERO.muted, px: 0.75 }}>
+                                {h}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {result.bpuAudit.lines.map((l) => (
+                            <TableRow key={l.code} sx={{ bgcolor: l.hasDiscrepancy ? 'rgba(253,238,235,0.7)' : 'transparent' }}>
+                              <TableCell sx={{ px: 0.75, fontFamily: MONO }}>
+                                <Typography sx={{ fontSize: 11, fontWeight: 800, fontFamily: MONO, color: l.hasDiscrepancy ? NERO.danger : NERO.ink }}>{l.code}</Typography>
+                                <Typography sx={{ fontSize: 9.5, color: NERO.muted, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={l.designation}>
+                                  {l.designation}
+                                </Typography>
+                              </TableCell>
+                              <TableCell sx={{ px: 0.75, fontFamily: MONO, fontSize: 10.5, color: NERO.muted, whiteSpace: 'nowrap' }}>
+                                {l.qty} × {(l.unitPriceHT / 1000).toLocaleString('fr-DZ')}k
+                              </TableCell>
+                              <TableCell sx={{ px: 0.75, fontFamily: MONO, fontSize: 10.5, color: NERO.muted, whiteSpace: 'nowrap' }}>
+                                {(l.claimedTotalHT / 1000).toLocaleString('fr-DZ')}k
+                              </TableCell>
+                              <TableCell sx={{ px: 0.75, fontFamily: MONO, fontSize: 10.5, whiteSpace: 'nowrap' }}>
+                                <Box component="span" sx={{ color: l.hasDiscrepancy ? NERO.danger : NERO.success, fontWeight: 800 }}>
+                                  {(l.computedTotalHT / 1000).toLocaleString('fr-DZ')}k
+                                </Box>
+                                {l.hasDiscrepancy && (
+                                  <Typography sx={{ fontSize: 8.5, color: NERO.danger, fontFamily: MONO }}>
+                                    ÉCART {l.discrepancyHT < 0 ? '-' : '+'}
+                                    {Math.abs(l.discrepancyHT).toLocaleString('fr-DZ')} DA
+                                  </Typography>
+                                )}
+                              </TableCell>
+                              <TableCell sx={{ px: 0.75, textAlign: 'right' }}>
+                                <Chip size="small" label={`${l.tvaRate}%`} sx={{ height: 18, fontSize: 9.5, fontFamily: MONO, bgcolor: NERO.paperDeep }} />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+
+                    <Divider sx={{ my: 1.5 }} />
+                    <Stack spacing={0.75} sx={{ fontFamily: MONO }}>
+                      <Stack direction="row" justifyContent="space-between">
+                        <Typography sx={{ fontSize: 11, color: NERO.muted }}>Total HT déclaré</Typography>
+                        <Typography sx={{ fontSize: 11, fontFamily: MONO, color: NERO.muted }}>{formatDZD(result.bpuAudit.claimedGrandTotalHT)}</Typography>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between">
+                        <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: NERO.ink }}>Total HT calculé</Typography>
+                        <Typography sx={{ fontSize: 11.5, fontFamily: MONO, fontWeight: 800, color: result.bpuAudit.hasErrors ? NERO.danger : NERO.success }}>
+                          {formatDZD(result.bpuAudit.computedGrandTotalHT)}
+                        </Typography>
+                      </Stack>
+                      <Stack direction="row" justifyContent="space-between">
+                        <Typography sx={{ fontSize: 10.5, color: NERO.muted }}>TVA (9% solaire & 19% standard)</Typography>
+                        <Typography sx={{ fontSize: 10.5, fontFamily: MONO, color: NERO.muted }}>{formatDZD(result.bpuAudit.totalTVA)}</Typography>
+                      </Stack>
+                      <Divider />
+                      <Stack direction="row" justifyContent="space-between" sx={{ pt: 0.25 }}>
+                        <Typography sx={{ fontSize: 13, fontWeight: 900, color: NERO.tealDeep }}>Total général TTC</Typography>
+                        <Typography sx={{ fontSize: 13, fontFamily: MONO, fontWeight: 900, color: NERO.tealDeep }}>{formatDZD(result.bpuAudit.grandTotalTTC)}</Typography>
+                      </Stack>
+                    </Stack>
+                  </CardContent>
+                </Card>
+              </Box>
+
+              {/* MÉMOIRE + TERMINAL */}
+              <Card>
+                <CardContent sx={{ p: { xs: 2.25, sm: 3 } }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1.5} sx={{ mb: 2 }}>
+                    <Stack direction="row" spacing={1.25} alignItems="center">
+                      <CodeIcon sx={{ fontSize: 20, color: NERO.tealDeep }} />
+                      <Box>
+                        <Typography sx={{ fontSize: 13.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.05em', color: NERO.ink }}>
+                          Mémoire technique justificatif
+                        </Typography>
+                        <Typography sx={{ fontSize: 11.5, color: NERO.muted }}>
+                          Rédigé sur-mesure selon les barèmes de notation de la Loi n° 23-12
+                        </Typography>
+                      </Box>
+                    </Stack>
+
+                    <Stack direction="row" spacing={1} className="no-print">
+                      <Button
+                        size="small"
+                        onClick={copyMemoireToClipboard}
+                        startIcon={<ContentCopyIcon sx={{ fontSize: 15 }} />}
+                        sx={{ bgcolor: '#fff', color: NERO.ink, border: `1px solid ${NERO.line}`, fontSize: 11.5, '&:hover': { bgcolor: NERO.paperDeep } }}
+                      >
+                        {isCopied ? 'Copié !' : 'Copier'}
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={handlePrint}
+                        startIcon={<PrintIcon sx={{ fontSize: 15 }} />}
+                        sx={{ bgcolor: '#fff', color: NERO.ink, border: `1px solid ${NERO.line}`, fontSize: 11.5, '&:hover': { bgcolor: NERO.paperDeep } }}
+                      >
+                        Imprimer / PDF
+                      </Button>
+                    </Stack>
+                  </Stack>
+
+                  <Box
+                    sx={{
+                      bgcolor: NERO.paper,
+                      border: `1px solid ${NERO.line}`,
+                      borderRadius: 3,
+                      p: { xs: 2, sm: 3 },
+                      maxHeight: 380,
+                      overflowY: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: MONO,
+                      fontSize: 11.5,
+                      lineHeight: 1.75,
+                      color: '#2B2820',
+                    }}
+                  >
+                    {result.pass1Result.memoireTechnique.fullMarkdown}
+                  </Box>
+
+                  <Accordion
+                    className="no-print"
+                    expanded={isTerminalExpanded}
+                    onChange={(_, exp) => setIsTerminalExpanded(exp)}
+                    sx={{ mt: 2, bgcolor: NERO.dark, color: 'rgba(255,255,255,0.8)', border: 'none' }}
+                  >
+                    <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: NERO.teal }} />}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <TerminalIcon sx={{ fontSize: 17, color: NERO.teal }} />
+                        <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#BFE0EE', fontFamily: MONO }}>
+                          Terminal agent — trace Gemma 4 & fichiers SKILL.md
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={result.executionMode}
+                          sx={{ bgcolor: 'rgba(108,168,201,0.15)', color: '#9fd0e3', border: '1px solid rgba(108,168,201,0.3)', fontFamily: MONO, fontSize: 9.5, height: 20 }}
+                        />
+                      </Stack>
+                    </AccordionSummary>
+                    <AccordionDetails sx={{ pt: 0 }}>
+                      <Typography sx={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', mb: 1 }}>
+                        Compétences actives
+                      </Typography>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 1 }}>
+                        {result.activeSkillsUsed.map((skill, i) => (
+                          <Box key={i} sx={{ p: 1.5, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                            <Stack direction="row" justifyContent="space-between" alignItems="center">
+                              <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: NERO.teal, fontFamily: MONO }}>
+                                skills/{skill.name}
+                              </Typography>
+                              <Typography sx={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontFamily: MONO }}>v{skill.version}</Typography>
+                            </Stack>
+                            <Typography sx={{ fontSize: 10, color: 'rgba(255,255,255,0.55)', mt: 0.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {skill.description}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Box>
+
+                      <Typography sx={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: NERO.teal, mt: 2, mb: 1 }}>
+                        Trace interne Chain-of-Thought
+                      </Typography>
+                      <Box
+                        component="pre"
+                        sx={{
+                          m: 0,
+                          p: 2,
+                          borderRadius: 2,
+                          bgcolor: '#0B0A08',
+                          border: '1px solid rgba(108,168,201,0.2)',
+                          color: '#BFE0EE',
+                          fontFamily: MONO,
+                          fontSize: 10.5,
+                          lineHeight: 1.7,
+                          maxHeight: 260,
+                          overflow: 'auto',
+                          whiteSpace: 'pre-wrap',
+                        }}
+                      >
+                        {result.thoughtTrace}
+                      </Box>
+                    </AccordionDetails>
+                  </Accordion>
+                </CardContent>
+              </Card>
+            </Stack>
+          )}
+        </Box>
+
+        {/* ===== FOOTER (NERO glow) ===== */}
+        <Box
+          component="footer"
+          className="no-print"
+          sx={{ position: 'relative', mt: 6, bgcolor: NERO.dark, color: 'rgba(255,255,255,0.7)', py: 5, px: 3, overflow: 'hidden' }}
+        >
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: '-40%',
+              height: '80%',
+              filter: 'blur(70px)',
+              opacity: 0.5,
+              background:
+                'radial-gradient(closest-side, rgba(108,168,201,0.9), transparent 70%) 15% 50%/40% 100% no-repeat, radial-gradient(closest-side, rgba(255,170,120,0.8), transparent 70%) 50% 60%/40% 100% no-repeat, radial-gradient(closest-side, rgba(150,120,230,0.8), transparent 70%) 85% 50%/40% 100% no-repeat',
+            }}
+          />
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={2}
+            justifyContent="space-between"
+            alignItems={{ xs: 'center', md: 'center' }}
+            sx={{ position: 'relative', zIndex: 2, maxWidth: 1160, mx: 'auto', textAlign: { xs: 'center', md: 'left' } }}
+          >
+            <Stack direction="row" spacing={1.25} alignItems="center">
+              <Box sx={{ width: 30, height: 30, borderRadius: 2, display: 'grid', placeItems: 'center', background: `linear-gradient(135deg, ${NERO.teal}, ${NERO.tealDeep})` }}>
+                <MemoryIcon sx={{ color: '#fff', fontSize: 18 }} />
+              </Box>
+              <Typography sx={{ color: '#fff', fontWeight: 900 }}>
+                Soumission
+                <Box component="span" sx={{ color: NERO.teal }}>
+                  AI
+                </Box>
+                -DZ
+              </Typography>
+            </Stack>
+            <Typography sx={{ fontSize: 12.5 }}>
+              Conforme à la Loi n° 23-12 du 5 août 2023 · Licence Apache-2.0
+            </Typography>
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <InfoOutlinedIcon sx={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }} />
+              <Typography sx={{ fontSize: 12.5 }}>Développé pour la communauté open-source algérienne 🇩🇿</Typography>
+            </Stack>
+          </Stack>
+        </Box>
+      </Box>
+    </ThemeProvider>
   );
 }
