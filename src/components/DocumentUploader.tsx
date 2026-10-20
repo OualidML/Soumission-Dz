@@ -30,27 +30,31 @@ export function DocumentUploader({
     // Read file as ArrayBuffer
     const arrayBuffer = await file.arrayBuffer();
 
-    // Try loading pdf.js from CDN dynamically if not already on window
+    // Try client-side PDF.js with 8-second Promise.race timeout
     try {
-      if (!(window as any).pdfjsLib) {
-        await new Promise<void>((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-          script.onload = () => {
-            const pdfjs = (window as any).pdfjsLib;
-            if (pdfjs) {
-              pdfjs.GlobalWorkerOptions.workerSrc =
-                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            }
-            resolve();
-          };
-          script.onerror = () => reject(new Error('Failed to load pdf.js from CDN'));
-          document.head.appendChild(script);
-        });
-      }
+      const pdfJsExtractionPromise = (async (): Promise<string> => {
+        if (!(window as any).pdfjsLib) {
+          await new Promise<void>((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+            script.onload = () => {
+              const pdfjs = (window as any).pdfjsLib;
+              if (pdfjs) {
+                pdfjs.GlobalWorkerOptions.workerSrc =
+                  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+              }
+              resolve();
+            };
+            script.onerror = () => reject(new Error('Failed to load pdf.js from CDN'));
+            document.head.appendChild(script);
+          });
+        }
 
-      const pdfjsLib = (window as any).pdfjsLib;
-      if (pdfjsLib) {
+        const pdfjsLib = (window as any).pdfjsLib;
+        if (!pdfjsLib) {
+          throw new Error('pdfjsLib is undefined after script load');
+        }
+
         const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
         const pdf = await loadingTask.promise;
         const pageTexts: string[] = [];
@@ -72,9 +76,22 @@ export function DocumentUploader({
         if (fullText.trim().length > 30) {
           return fullText;
         }
+        throw new Error('Extracted PDF text is too short or empty');
+      })();
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('PDF extraction timed out after 8s limit')), 8000)
+      );
+
+      const resultText = await Promise.race([pdfJsExtractionPromise, timeoutPromise]);
+      if (resultText) {
+        return resultText;
       }
-    } catch (cdnError) {
-      console.warn('[DocumentUploader] PDF.js CDN failed, using stream fallback parser:', cdnError);
+    } catch (cdnOrTimeoutError) {
+      console.warn(
+        '[DocumentUploader] PDF.js CDN failed or timed out (8s limit), falling back to client-side stream parser:',
+        cdnOrTimeoutError
+      );
     }
 
     // Fallback: Client-side binary stream decoder for text blocks in PDF streams

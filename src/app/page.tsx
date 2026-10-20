@@ -80,7 +80,10 @@ export default function HomePage() {
     setStepMessage('1/4 Chargement des 3 Agents Skills modulaires (SKILL.md)...');
 
     try {
-      const isCustom = inputTab === 'pdf' || isCustomMode || (!!customText && customText.trim().length > 10);
+      const uploadedCustomText = customText;
+      const isCustom = inputTab === 'pdf' || isCustomMode || selectedTenderId === 'custom' || selectedTenderId === 'custom-tender' || (!!uploadedCustomText && uploadedCustomText.trim().length > 0);
+      const isCustomUpload = isCustom || selectedTenderId === 'custom' || Boolean(uploadedCustomText);
+
       const activeT = isCustom
         ? {
             id: 'custom-tender',
@@ -90,7 +93,7 @@ export default function HomePage() {
             title: uploadedFileName ? `Cahier des Charges — ${uploadedFileName}` : 'Cahier des charges personnalisé',
             authority: 'Commission des Marchés Publics',
             sector: 'Marché Public Personnalisé',
-            RawText: customText || 'Cahier des charges soumis à l\'audit...',
+            RawText: uploadedCustomText || 'Cahier des charges soumis à l\'audit...',
             bpuItems: [],
           }
         : tenders.find((t) => t.id === tenderIdToUse) || tenders[0];
@@ -109,7 +112,7 @@ export default function HomePage() {
           tenderData: activeT,
           companyProfile: activeP,
           rawTenderText: activeT.RawText,
-          isCustomUpload: isCustom,
+          isCustomUpload: selectedTenderId === 'custom' || Boolean(uploadedCustomText) || isCustomUpload,
         }),
       });
 
@@ -127,6 +130,10 @@ export default function HomePage() {
       setIsLoading(false);
       setStepMessage('');
     }
+  };
+
+  const handleAnalyze = async (tenderIdToUse = selectedTenderId, profileIdToUse = selectedProfileId) => {
+    return runAudit(tenderIdToUse, profileIdToUse);
   };
 
   const copyMemoireToClipboard = () => {
@@ -484,24 +491,32 @@ export default function HomePage() {
                     <span>Pièges Fatals Relevés par le Président de la COPEO (Pass 2 Critic) :</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {(result?.pass2Critic?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || []).map((trap, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-red-950/40 border border-red-800/80 rounded-lg p-3 text-xs space-y-1"
-                      >
-                        <div className="flex items-center justify-between text-red-300 font-semibold">
-                          <span>⚠️ {trap.trapId}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/60 font-mono">
-                            {trap.severity}
-                          </span>
+                    {(result?.pass2Critic?.criticalTrapsFound || result?.pass2Critic?.fatalTrapsIdentified || []).map((trap: any, idx: number) => {
+                      const trapId = typeof trap === 'string' ? `TRAP-0${idx + 1}` : (trap?.trapId || `TRAP-0${idx + 1}`);
+                      const severity = typeof trap === 'string' ? 'FATAL' : (trap?.severity || 'FATAL');
+                      const cause = typeof trap === 'string' ? trap : (trap?.cause || String(trap));
+                      const legalBasis = typeof trap !== 'string' && trap?.legalBasis ? trap.legalBasis : 'Loi n° 23-12 Art. 47 & 72';
+                      const correctionRequired = typeof trap !== 'string' && trap?.correctionRequired ? trap.correctionRequired : 'Régulariser impérativement la pièce ou rectifier l\'addition avant l\'ouverture des plis.';
+
+                      return (
+                        <div
+                          key={idx}
+                          className="bg-red-950/40 border border-red-800/80 rounded-lg p-3 text-xs space-y-1"
+                        >
+                          <div className="flex items-center justify-between text-red-300 font-semibold">
+                            <span>⚠️ {trapId}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/60 font-mono">
+                              {severity}
+                            </span>
+                          </div>
+                          <p className="text-red-200">{cause}</p>
+                          <p className="text-[11px] text-red-300/80 italic">Loi : {legalBasis}</p>
+                          <div className="pt-1 text-[11px] text-amber-300 font-medium">
+                            ➜ Action corrective : {correctionRequired}
+                          </div>
                         </div>
-                        <p className="text-red-200">{trap.cause}</p>
-                        <p className="text-[11px] text-red-300/80 italic">Loi : {trap.legalBasis}</p>
-                        <div className="pt-1 text-[11px] text-amber-300 font-medium">
-                          ➜ Action corrective : {trap.correctionRequired}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

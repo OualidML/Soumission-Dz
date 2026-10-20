@@ -117,6 +117,27 @@ export async function callGemma4(
 }
 
 /**
+ * Safe fetch with explicit AbortController timeout handling.
+ * Guarantees timers are cleared and never hang serverless requests.
+ */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`Fetch timed out after ${timeoutMs}ms: ${url}`));
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Direct call to Google AI Studio with Gemma 4 CoT parsing rule:
  * thoughtTrace = parts.find(p => p.thought === true)?.text || ""
  * finalText = parts.filter(p => !p.thought).map(p => p.text).join('\n')
@@ -126,7 +147,7 @@ async function callGoogleAiStudio(
   apiKey: string,
   prompt: string,
   systemInstruction?: string,
-  timeoutMs = 18000,
+  timeoutMs = 15000,
   retryCount = 0
 ): Promise<{ thoughtTrace: string; finalText: string } | null> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -150,12 +171,15 @@ async function callGoogleAiStudio(
     };
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    timeoutMs
+  );
 
   // Handle 500 / 429 automatic retry once
   if ((response.status === 500 || response.status === 429) && retryCount === 0) {
@@ -196,7 +220,7 @@ async function callOpenRouter(
   model: string,
   prompt: string,
   systemInstruction?: string,
-  timeoutMs = 18000
+  timeoutMs = 15000
 ): Promise<{ thoughtTrace: string; finalText: string } | null> {
   const messages: { role: string; content: string }[] = [];
 
@@ -205,22 +229,25 @@ async function callOpenRouter(
   }
   messages.push({ role: 'user', content: prompt });
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://soumissionai-dz.algeria',
-      'X-Title': 'SoumissionAI-DZ',
+  const response = await fetchWithTimeout(
+    'https://openrouter.ai/api/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://soumissionai-dz.algeria',
+        'X-Title': 'SoumissionAI-DZ',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.2,
+        max_tokens: 4096,
+      }),
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.2,
-      max_tokens: 4096,
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+    timeoutMs
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
