@@ -67,25 +67,36 @@ export async function callGemma4(
     timeoutMs?: number;
   }
 ): Promise<GemmaResponse> {
-  const primaryModel = options?.model || process.env.GEMMA_PRIMARY_MODEL || 'gemma-4-26b-a4b-it';
-  const googleApiKey = process.env.GEMMA_API_KEY;
+  const googleApiKey = process.env.GEMMA_API_KEY || process.env.GOOGLE_API_KEY;
   const openRouterKey = process.env.OPENROUTER_API_KEY;
-  const openRouterModel = process.env.OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free';
-  const timeoutMs = options?.timeoutMs || Number(process.env.GEMMA_TIMEOUT_MS) || 18000;
+  const openRouterModel = process.env.OPENROUTER_MODEL || 'google/gemma-3-27b-it:free';
+  const timeoutMs = options?.timeoutMs || Number(process.env.GEMMA_TIMEOUT_MS) || 22000;
 
-  // Level 1: Google AI Studio Direct Call with 1x Retry on 500/429
+  const googleModelCascade = [
+    options?.model || process.env.GEMMA_PRIMARY_MODEL || 'gemma-4-26b-a4b-it',
+    'gemma-3-27b-it',
+    'gemini-2.5-flash',
+  ];
+
+  // Level 1: Google AI Studio cascade through models
   if (googleApiKey) {
-    try {
-      const result = await callGoogleAiStudio(primaryModel, googleApiKey, prompt, options?.systemInstruction, timeoutMs, 0);
-      if (result) {
-        return {
-          ...result,
-          provider: 'GOOGLE_AI_STUDIO',
-          modelUsed: primaryModel,
-        };
+    for (const model of googleModelCascade) {
+      try {
+        console.log(`[GemmaClient] Trying Google AI Studio model: ${model}`);
+        const result = await callGoogleAiStudio(model, googleApiKey, prompt, options?.systemInstruction, timeoutMs, 0);
+        if (result) {
+          console.log(`[GemmaClient] ✅ SUCCESS with model: ${model}`);
+          return {
+            ...result,
+            thoughtTrace: `[MODEL: ${model} | PROVIDER: Google AI Studio]\n${result.thoughtTrace}`,
+            provider: 'GOOGLE_AI_STUDIO',
+            modelUsed: model,
+          };
+        }
+      } catch (err: any) {
+        console.warn(`[GemmaClient] Model ${model} failed (${err.name || 'Error'}): ${err.message}`);
+        // Continue to next model in cascade
       }
-    } catch (err: any) {
-      console.warn(`[GemmaClient] Google AI Studio primary attempt failed (${err.name || 'Error'}):`, err.message);
     }
   }
 
@@ -97,19 +108,23 @@ export async function callGemma4(
       if (result) {
         return {
           ...result,
+          thoughtTrace: `[MODEL: ${openRouterModel} | PROVIDER: OpenRouter]\n${result.thoughtTrace}`,
           provider: 'OPENROUTER_FALLBACK',
           modelUsed: openRouterModel,
         };
       }
     } catch (err: any) {
-      console.warn(`[GemmaClient] OpenRouter fallback failed (${err.name || 'Error'}):`, err.message);
+      console.warn(`[GemmaClient] OpenRouter fallback failed (${err.name || 'Error'}): ${err.message}`);
     }
   }
 
-  // Level 3: Deterministic Local Fallback (Guarantees zero UI crash)
-  console.log('[GemmaClient] Upstream unreachable/timed out. Falling back to deterministic local engine');
+  // Level 3: Deterministic Local Fallback
+  const missingKeys = !googleApiKey && !openRouterKey 
+    ? 'No API keys configured (GEMMA_API_KEY / GOOGLE_API_KEY / OPENROUTER_API_KEY missing).'
+    : 'All cloud providers returned errors or were unreachable.';
+  console.log(`[GemmaClient] Falling back to deterministic local engine. Reason: ${missingKeys}`);
   return {
-    thoughtTrace: `[LOCAL RESILIENT FALLBACK ACTIVATED]\n- Google AI Studio and OpenRouter upstream APIs were rate-limited, unreachable, or timed out.\n- Local Loi 23-12 inference engine successfully executed with zero UI downtime.`,
+    thoughtTrace: `[LOCAL RESILIENT FALLBACK ACTIVATED]\n- ${missingKeys}\n- Local Loi 23-12 inference engine executed with zero UI downtime.`,
     finalText: '',
     provider: 'LOCAL_DETERMINISTIC_FALLBACK',
     modelUsed: 'local-deterministic-engine',
@@ -190,7 +205,12 @@ async function callGoogleAiStudio(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Google AI Studio HTTP ${response.status}: ${errorText}`);
+    // On 404 or 400, return null to let the caller cascade to next model
+    if (response.status === 404 || response.status === 400) {
+      console.warn(`[GemmaClient] Model not found/bad request (${response.status}) for ${model}: ${errorText.slice(0, 200)}`);
+      return null;
+    }
+    throw new Error(`Google AI Studio HTTP ${response.status}: ${errorText.slice(0, 500)}`);
   }
 
   const data = await response.json();

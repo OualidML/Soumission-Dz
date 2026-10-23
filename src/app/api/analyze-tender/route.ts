@@ -10,42 +10,146 @@ export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 /**
- * Helper to parse BPU items from custom raw text if tabular pricing is detected.
+ * Smart French/Algerian number parser.
+ * Handles: "4,500,000" → 4500000, "3.000.000" → 3000000, "4 500 000" → 4500000
+ * Rule: if dot/comma is followed by exactly 3 digits and then another separator or end, it is a thousands separator.
+ */
+function parseAlgerianNumber(raw: string): number {
+  if (!raw) return 0;
+  const s = raw.trim().replace(/\s/g, '');
+  if (!s) return 0;
+
+  // Count separators: if there are multiple dots or commas before end, they're thousands seps
+  const dotCount = (s.match(/\./g) || []).length;
+  const commaCount = (s.match(/,/g) || []).length;
+
+  // Pattern: "4.500.000" or "3.000.000" (dots as thousands)
+  if (dotCount >= 2 && commaCount === 0) {
+    return parseFloat(s.replace(/\./g, '')) || 0;
+  }
+  // Pattern: "4,500,000" (commas as thousands)
+  if (commaCount >= 2 && dotCount === 0) {
+    return parseFloat(s.replace(/,/g, '')) || 0;
+  }
+  // Pattern: "4.500,00" (dot=thousands, comma=decimal — French format)
+  if (dotCount === 1 && commaCount === 1 && s.indexOf('.') < s.indexOf(',')) {
+    return parseFloat(s.replace('.', '').replace(',', '.')) || 0;
+  }
+  // Pattern: "4,500.00" (comma=thousands, dot=decimal — English format)
+  if (commaCount === 1 && dotCount === 1 && s.indexOf(',') < s.indexOf('.')) {
+    return parseFloat(s.replace(',', '')) || 0;
+  }
+  // Pattern: "4500000" or "4,500" (single comma = thousands or decimal — ambiguous; treat as thousands if >3 digits after)
+  if (commaCount === 1 && dotCount === 0) {
+    const afterComma = s.split(',')[1] || '';
+    if (afterComma.length === 3) return parseFloat(s.replace(',', '')) || 0;
+    return parseFloat(s.replace(',', '.')) || 0;
+  }
+  if (dotCount === 1 && commaCount === 0) {
+    const afterDot = s.split('.')[1] || '';
+    if (afterDot.length === 3) return parseFloat(s.replace('.', '')) || 0;
+    return parseFloat(s) || 0;
+  }
+  return parseFloat(s.replace(/[^0-9.]/g, '')) || 0;
+}
+
+/** Returns true if line looks like a legal citation rather than a BPU row */
+function isLegalCitationLine(line: string): boolean {
+  const l = line.toLowerCase();
+  return (
+    /\bart\.\s*\d/.test(l) ||
+    /\bloi\s+\d{2,4}[-\/]\d{2,4}/.test(l) ||
+    /\barticle\s+\d{2,3}\b/.test(l) ||
+    /\bn[°o]\s*\d{2,4}\/\d{4}/.test(l) ||
+    /\balinéa\b/.test(l) ||
+    /\binstruction\b/.test(l) ||
+    l.includes('décret') ||
+    l.includes('arrêté') ||
+    l.includes('journal officiel')
+  );
+}
+
+/**
+ * Smart BPU extractor — isolates the BPU section first, then parses rows.
+ * Supports pipe-delimited tables and multi-column rows. Never matches legal article numbers.
  */
 function extractBpuItemsFromRawText(text: string): BpuItem[] | null {
   if (!text) return null;
-  const items: BpuItem[] = [];
 
-  // Look for LOT/MOD/ART/POSTE patterns with numbers
-  const lines = text.split('\n');
+  // Step 1: Isolate the BPU section
+  const bpuHeaderRegex = /(?:BORDEREAU\s+DES\s+PRIX(?:\s+UNITAIRES)?|B\.?P\.?U\.?|PRIX\s+UNITAIRES|DÉTAIL\s+(?:QUANTITATIF|ESTIMATIF))/i;
+  const allLines = text.split(/\r?\n/);
+  let bpuStartLine = -1;
+  for (let i = 0; i < allLines.length; i++) {
+    if (bpuHeaderRegex.test(allLines[i])) {
+      bpuStartLine = i;
+      break;
+    }
+  }
+
+  // Use only BPU section lines if found; otherwise scan full text (may find nothing)
+  const scanLines = bpuStartLine >= 0 ? allLines.slice(bpuStartLine) : allLines;
+
+  const items: BpuItem[] = [];
   let index = 1;
 
-  for (const line of lines) {
-    const itemMatch = line.match(/(?:LOT|MOD|ART|ITEM|POSTE|ARTICLE)[-_\s]?0?([0-9]+)[\s:.-]+([^,;\t\n]+)/i);
-    const numbersMatch = line.match(/([0-9]{1,3}(?:[ .][0-9]{3})*|[0-9]+)/g);
+  for (const rawLine of scanLines) {
+    const line = rawLine.trim();
+    if (!line || line.length < 5) continue;
+    if (isLegalCitationLine(line)) continue;
 
-    if (itemMatch && numbersMatch && numbersMatch.length >= 2) {
-      const code = `LOT-0${itemMatch[1] || index}`;
-      const designation = itemMatch[2].trim().slice(0, 60);
+    // Strategy A: Pipe-delimited table row: "01 | Designation | 1 | 4,500,000 | 4,500,000"
+    if (line.includes('|')) {
+      const parts = line.split('|').map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 4) {
+        const maybeCode = parts[0];
+        const maybeDesig = parts[1];
+        // Find last 3 numeric columns (qty, unitPrice, total)
+        const numericParts = parts.slice(2).map((p) => parseAlgerianNumber(p)).filter((n) => n > 0);
+        if (numericParts.length >= 2) {
+          const qty = numericParts[0] <= 10000 ? numericParts[0] : 1;
+          const unitPriceHT = numericParts[1] >= 100 ? numericParts[1] : numericParts[numericParts.length - 1];
+          const claimedTotalHT = numericParts.length >= 3 ? numericParts[2] : qty * unitPriceHT;
+          // Only add if unit price is realistic (>= 100 DA)
+          if (unitPriceHT >= 100) {
+            items.push({
+              code: /^\d+$/.test(maybeCode) ? `BPU-${maybeCode.padStart(2, '0')}` : maybeCode || `BPU-${String(index).padStart(2, '0')}`,
+              designation: maybeDesig.slice(0, 80),
+              unit: parts.find((p) => /^(U|FF|ML|M²|M³|KG|T|J|H|ENS|FT)$/i.test(p)) || 'U',
+              qty,
+              unitPriceHT,
+              claimedTotalHT,
+              tvaRate: line.includes('9%') ? 9 : 19,
+            });
+            index++;
+            continue;
+          }
+        }
+      }
+    }
 
-      const parsedNumbers = numbersMatch
-        .map((n) => parseInt(n.replace(/[ .]/g, ''), 10))
-        .filter((n) => !isNaN(n) && n > 0);
+    // Strategy B: Numeric-rich line without pipe (tab or space separated)
+    const numberTokens = line.match(/\d[\d\s,.]*\d|\d+/g) || [];
+    const parsedNums = numberTokens.map(parseAlgerianNumber).filter((n) => n >= 100);
+    if (parsedNums.length >= 2) {
+      // Extract designation: everything before the first large number
+      const firstNumIdx = line.search(/\d[\d\s,.]*\d|\d+/);
+      const designation = line.slice(0, firstNumIdx).replace(/^[\d.\-|]+\s*/, '').trim().slice(0, 80);
+      if (!designation || designation.length < 3) continue;
 
-      if (parsedNumbers.length >= 2) {
-        const qty = parsedNumbers[0] <= 1000 ? parsedNumbers[0] : 1;
-        const unitPriceHT = parsedNumbers[1];
-        const claimedTotalHT = parsedNumbers.length >= 3 ? parsedNumbers[2] : qty * unitPriceHT;
-        const tvaRate = line.includes('9%') ? 9 : 19;
+      const qty = parsedNums[0] <= 10000 ? parsedNums[0] : 1;
+      const unitPriceHT = parsedNums.length >= 2 ? parsedNums[1] : parsedNums[0];
+      const claimedTotalHT = parsedNums.length >= 3 ? parsedNums[parsedNums.length - 1] : qty * unitPriceHT;
 
+      if (unitPriceHT >= 100) {
         items.push({
-          code,
+          code: `BPU-${String(index).padStart(2, '0')}`,
           designation,
           unit: 'U',
           qty,
           unitPriceHT,
           claimedTotalHT,
-          tvaRate,
+          tvaRate: line.includes('9%') ? 9 : 19,
         });
         index++;
       }

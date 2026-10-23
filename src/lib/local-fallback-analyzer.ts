@@ -19,6 +19,26 @@ export function runDeterministicLocalAnalysis(
   const reference = (tenderData.reference || '').toLowerCase();
   const combinedText = `${reference} ${title} ${rawText}`;
 
+  // Extract real metadata from uploaded document text
+  const rawTextForExtraction = tenderData.RawText || '';
+
+  // Extract real Objet/Title
+  const objetMatch = rawTextForExtraction.match(/Objet\s*(?:du\s+march[ee])?\s*:\s*([^\n\r]+)/i);
+  const extractedObjet = objetMatch ? objetMatch[1].trim() : '';
+
+  // Extract real Reference number
+  const refMatch = rawTextForExtraction.match(/(?:N[°o]|R[ée]f[ée]rence)\s*:?\s*([A-Z0-9][A-Z0-9/.\-]+)/i);
+  const extractedReference = refMatch ? refMatch[1].trim() : '';
+
+  // Extract real authority from header (first lines of document)
+  const headerText = rawTextForExtraction.slice(0, 800);
+  const authorityLines = headerText.split(/\r?\n/).filter((l: string) => l.trim().length > 10 && l.trim().length < 120);
+  const extractedAuthority = authorityLines.slice(0, 3).map((l: string) => l.trim()).join(' — ').trim();
+
+  const realTitle = extractedObjet || tenderData.title || 'Cahier des charges personnalisé';
+  const realReference = extractedReference || tenderData.reference || 'CUSTOM/2026/DZ';
+  const realAuthority = extractedAuthority || tenderData.authority || 'Commission des Marchés Publics';
+
   // 1. Requirement Detection from Actual Document Text
   const requiresIso14001 =
     combinedText.includes('14001') ||
@@ -30,6 +50,34 @@ export function runDeterministicLocalAnalysis(
     combinedText.includes('9001') ||
     combinedText.includes('iso 9001') ||
     combinedText.includes('management de la qualité');
+
+  const requiresIso27001 =
+    combinedText.includes('27001') ||
+    combinedText.includes('iso 27001') ||
+    combinedText.includes('sécurité de l\'information') ||
+    combinedText.includes('securite de l\'information') ||
+    combinedText.includes('smsi');
+
+  const requiresIso45001 =
+    combinedText.includes('45001') ||
+    combinedText.includes('iso 45001') ||
+    combinedText.includes('santé et sécurité au travail') ||
+    combinedText.includes('sst');
+
+  const requiresCissp =
+    combinedText.includes('cissp') ||
+    combinedText.includes('certified information systems security');
+
+  const requiresCeh =
+    combinedText.includes('ceh') ||
+    combinedText.includes('certified ethical hacker') ||
+    combinedText.includes('ethical hacker');
+
+  const requiresQualificationPro =
+    combinedText.includes('qualification') ||
+    combinedText.includes('agrément') ||
+    combinedText.includes('habilitation professionnelle') ||
+    combinedText.includes('capacités professionnelles');
 
   const requiresCacobatph =
     combinedText.includes('cacobatph') ||
@@ -46,9 +94,12 @@ export function runDeterministicLocalAnalysis(
     combinedText.includes('start-up') ||
     combinedText.includes('art. 87') ||
     combinedText.includes('article 87') ||
-    combinedText.includes('jeune entreprise innovante') ||
-    combinedText.includes('constantine') ||
-    combinedText.includes('chu');
+    combinedText.includes('jeune entreprise innovante');
+
+  // Only create a RESERVATION trap if the tender is EXCLUSIVELY reserved for startups
+  const isStartupReserved =
+    /r[ee]serv[ee]\s+exclusivement\s+aux\s+start[-\s]?up/i.test(tenderData.RawText || '') ||
+    /march[ee]\s+r[ee]serv[ee]\s+aux\s+start[-\s]?up/i.test(tenderData.RawText || '');
 
   // Search for explicit eliminatory clauses in document
   const rawLines = (tenderData.RawText || '').split(/\r?\n/);
@@ -102,6 +153,45 @@ export function runDeterministicLocalAnalysis(
       cause: 'Certificat de management de la qualité ISO 9001 exigé par le document non fourni.',
       legalBasis: 'Loi n° 23-12 Art. 47 & Spécifications du Cahier des Charges.',
       correctionRequired: 'Fournir l\'attestation de certification ISO 9001 en cours de validité.',
+    });
+  }
+
+  // C2. ISO 27001 Check (Information Security - Cybersecurity tenders)
+  const hasIso27001 = certs.some((c) => c.toLowerCase().includes('27001'));
+  if (requiresIso27001 && !hasIso27001) {
+    eliminationRiskPercent += 60;
+    fatalTraps.push({
+      trapId: 'TRAP-ISO27001-FATAL',
+      severity: 'FATAL',
+      cause: "Absence du certificat de management de la sécurité de l'information ISO/IEC 27001 requis expressément par le Cahier des Charges.",
+      legalBasis: 'Loi n\u00b0 23-12 Art. 47 & Clause \u00e9liminatoire expresse du Cahier des Charges.',
+      correctionRequired: "Obtenir la certification ISO 27001 ou constituer un groupement solidaire avec un partenaire certifié avant l'ouverture des plis.",
+    });
+  }
+
+  // C3. CISSP Check (Cybersecurity qualification)
+  const hasCissp = certs.some((c) => c.toLowerCase().includes('cissp'));
+  if (requiresCissp && !hasCissp) {
+    eliminationRiskPercent += 50;
+    fatalTraps.push({
+      trapId: 'TRAP-CISSP-FATAL',
+      severity: 'FATAL',
+      cause: 'Certification CISSP (Certified Information Systems Security Professional) requise pour les experts affect\u00e9s au march\u00e9 et non fournie.',
+      legalBasis: 'Loi n\u00b0 23-12 Art. 47 & Sp\u00e9cifications techniques du Cahier des Charges.',
+      correctionRequired: 'Fournir les certificats CISSP des experts cybers\u00e9curit\u00e9 d\u00e9sign\u00e9s dans le dossier technique (CV + dipl\u00f4mes).',
+    });
+  }
+
+  // C4. CEH Check (Ethical Hacker certification)
+  const hasCeh = certs.some((c) => c.toLowerCase().includes('ceh') || c.toLowerCase().includes('ethical hacker'));
+  if (requiresCeh && !hasCeh) {
+    eliminationRiskPercent += 40;
+    fatalTraps.push({
+      trapId: 'TRAP-CEH-DEFECT',
+      severity: 'HIGH',
+      cause: 'Certification CEH (Certified Ethical Hacker) requise pour les auditeurs de s\u00e9curit\u00e9 d\u00e9sign\u00e9s et non fournie.',
+      legalBasis: 'Loi n\u00b0 23-12 Art. 47 & Sp\u00e9cifications techniques du Cahier des Charges.',
+      correctionRequired: "Fournir les certificats CEH des auditeurs de sécurité désignés dans l'Enveloppe B (Offre Technique).",
     });
   }
 
@@ -318,6 +408,40 @@ export function runDeterministicLocalAnalysis(
     },
   ];
 
+  if (requiresIso27001) {
+    envelopeAItems.push({
+      id: 'A-ISO27001',
+      label: 'Certificat ISO/IEC 27001 (Management de la Sécurité de l\'Information) en cours de validité',
+      legalReference: 'Loi n° 23-12 Art. 47 & CPS',
+      required: true,
+      isEliminatory: true,
+      status: hasIso27001 ? ('COMPLIANT' as const) : ('NON_COMPLIANT' as const),
+      details: hasIso27001 ? 'Certification ISO 27001 fournie.' : 'MANQUANT : Certification ISO 27001 requise et non fournie.',
+    });
+  }
+  if (requiresCissp) {
+    envelopeAItems.push({
+      id: 'A-CISSP',
+      label: 'Certification CISSP des experts cybersécurité désignés',
+      legalReference: 'Loi n° 23-12 Art. 47 & Spécifications techniques CPS',
+      required: true,
+      isEliminatory: true,
+      status: hasCissp ? ('COMPLIANT' as const) : ('NON_COMPLIANT' as const),
+      details: hasCissp ? 'Certification CISSP fournie.' : 'MANQUANT : Certification CISSP des experts requise et non fournie.',
+    });
+  }
+  if (requiresCeh) {
+    envelopeAItems.push({
+      id: 'A-CEH',
+      label: 'Certification CEH (Certified Ethical Hacker) des auditeurs de sécurité',
+      legalReference: 'Loi n° 23-12 Art. 47 & Spécifications techniques CPS',
+      required: true,
+      isEliminatory: false,
+      status: hasCeh ? ('COMPLIANT' as const) : ('NON_COMPLIANT' as const),
+      details: hasCeh ? 'Certification CEH fournie.' : 'VIGILANCE : Certification CEH recommand\u00e9e pour les auditeurs de s\u00e9curit\u00e9.',
+    });
+  }
+
   const envelopeBItems = [
     {
       id: 'B-01',
@@ -441,8 +565,8 @@ export function runDeterministicLocalAnalysis(
       ],
     },
     memoireTechnique: {
-      title: `MÉMOIRE TECHNIQUE JUSTIFICATIF — ${tenderData.title}`,
-      introduction: `Le présent mémoire technique est soumis par la société ${companyProfile.name} dans le cadre de la consultation ${tenderData.reference}, en stricte conformité avec la Loi n° 23-12 du 5 août 2023 régissant les marchés publics.`,
+      title: `MÉMOIRE TECHNIQUE JUSTIFICATIF — ${realTitle}`,
+      introduction: `Le présent mémoire technique est soumis par la société ${companyProfile.name} dans le cadre de la consultation ${realReference}, en stricte conformité avec la Loi n° 23-12 du 5 août 2023 régissant les marchés publics.`,
       companyPresentation: `Entreprise établie à ${companyProfile.wilaya}, forte de ${companyProfile.yearsActive} années d'expérience et d'une équipe permanente de ${companyProfile.engineersCount} ingénieurs. ${companyProfile.startupLabel ? 'Labellisée Start-up sous l\'égide du Ministère de l\'Économie de la Connaissance (Article 87 de la Loi 23-12).' : `Capital et chiffre d'affaires annuel certifié par CAC.`}`,
       humanResourcesMethodology: `Mobilisation d'une équipe dédiée et d'ingénieurs permanents déclarés à la CNAS avec respect strict des procédures de sécurité et des normes algériennes.`,
       materialAndTechnicalExecution: `Moyens matériels déployés : ${Array.isArray(companyProfile?.keyEquipment) && companyProfile.keyEquipment.length > 0 ? companyProfile.keyEquipment.join(', ') : 'Équipements et outillage certifiés'}. Conformité rigoureuse aux spécifications techniques du cahier des charges.`,
@@ -450,8 +574,8 @@ export function runDeterministicLocalAnalysis(
       conclusion: `Par ce mémoire, ${companyProfile.name} atteste de sa capacité pleine et entière à exécuter la prestation conformément aux exigences régaliennes.`,
       fullMarkdown: `# RÉPUBLIQUE ALGÉRIENNE DÉMOCRATIQUE ET POPULAIRE
 ## MÉMOIRE TECHNIQUE JUSTIFICATIF
-**Marché Public Référence :** ${tenderData.reference}  
-**Maître d'Ouvrage :** ${tenderData.authority}  
+**Marché Public Référence :** ${realReference}  
+**Maître d'Ouvrage :** ${realAuthority}  
 **Soumissionnaire :** ${companyProfile.name} (RC: ${companyProfile.rc} / NIF: ${companyProfile.nif})  
 **Cadre Légal :** Loi n° 23-12 du 5 août 2023 régissant les marchés publics (Article 47)  
 
@@ -464,7 +588,7 @@ La société **${companyProfile.name}**, domiciliée à **${companyProfile.wilay
 ${companyProfile.startupLabel ? `- **Statut Légal Innovant :** ${companyProfile.startupLabel} — Bénéficiaire des mesures incitatives de l'Article 87 de la Loi n° 23-12.` : `- **Solidité Financière :** Chiffre d'affaires annuel moyen de ${((companyProfile.avgAnnualTurnoverDZD || 0) / 1000000).toFixed(1)} M DA.`}
 
 ### 2. COMPRÉHENSION DES BESOINS ET SPÉCIFICATIONS DU CAHIER DES CHARGES
-L'objet de la présente consultation consiste en : **${tenderData.title}**.  
+L'objet de la présente consultation consiste en : **${realTitle}**.  
 Nos équipes ont analysé l'ensemble des clauses techniques et administratives du document soumis. Nous nous engageons formellement sur :
 - Le respect absolu des délais d'exécution contractuels.
 - La conformité stricte aux normes de sécurité industrielle et environnementale.
