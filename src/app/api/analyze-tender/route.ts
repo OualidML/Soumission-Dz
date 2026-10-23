@@ -3,6 +3,8 @@ import { loadSkillBySlug } from '@/lib/skill-loader';
 import { auditBpuItems } from '@/lib/bpu-math';
 import { callGemma4, parseSafeJson } from '@/lib/gemma-client';
 import { runDeterministicLocalAnalysis } from '@/lib/local-fallback-analyzer';
+import { extractBpuHeuristic } from '@/lib/bpu-heuristic';
+import { extractRequiredTurnover, extractRequiredCerts, classifyStartupClauses } from '@/lib/requirement-checks';
 import { TenderData, CompanyProfile, AnalysisResponse, FatalTrap, BpuItem } from '@/lib/types';
 
 // Vercel Serverless Function Execution Config (Timeout Protection)
@@ -73,7 +75,7 @@ function isLegalCitationLine(line: string): boolean {
  * Smart BPU extractor — isolates the BPU section first, then parses rows.
  * Supports pipe-delimited tables and multi-column rows. Never matches legal article numbers.
  */
-function extractBpuItemsFromRawText(text: string): BpuItem[] | null {
+function extractBpuStructured(text: string): BpuItem[] | null {
   if (!text) return null;
 
   // Step 1: Isolate the BPU section
@@ -157,6 +159,13 @@ function extractBpuItemsFromRawText(text: string): BpuItem[] | null {
   }
 
   return items.length > 0 ? items : null;
+}
+
+/**
+ * Two-stage BPU extraction. BPU_DATA_NOT_FOUND only if BOTH stages fail.
+ */
+function extractBpuItemsFromRawText(text: string): BpuItem[] | null {
+  return extractBpuStructured(text) || extractBpuHeuristic(text);
 }
 
 export async function POST(req: NextRequest) {
@@ -310,6 +319,9 @@ Mandate:
     // STEP 3 — Context-Locked Agent Pass 2 (COPEO Disqualification Critic)
     // =========================================================================
     // STRICT ANTI-CONTRADICTION LOCK: Feed Pass 2 the exact missing items and math errors
+    const requiredTurnover = extractRequiredTurnover(rawTenderText);
+    const requiredCerts = extractRequiredCerts(rawTenderText);
+    const startupClauses = classifyStartupClauses(rawTenderText);
     const pass2Prompt = `
 You are executing SKILL: ${criticSkill.metadata.name}
 Instructions:
@@ -340,6 +352,10 @@ Rules:
 2. If BPU Data is not found, you MUST flag it as a critical trap in Envelope C.
 3. If missingItems.length > 0 or bpuAudit.hasErrors or bpuAudit.status === 'BPU_DATA_NOT_FOUND', eliminationRiskPercent MUST be >= 15% (triggering CRITICAL_DISQUALIFICATION_WARNING).
 4. If the bidder is a Labelled Startup and the tender allows Loi 23-12 Art. 87 exemptions, confirm the exemptions and verify if risk is under 15%.
+5. NUMERICAL COMPARISON: Convert every numeric threshold to integer DZD and compare with the bidder profile. If actual < required, emit TRAP-FINANCIAL-INSUFFICIENCY (FATAL).
+   Deterministic extraction -> Required turnover: ${requiredTurnover ? requiredTurnover.requiredValueDZD + ' DZD' : 'none stated'} | Bidder turnover: ${Math.round(companyProfile.avgAnnualTurnoverDZD || 0)} DZD.
+6. EXHAUSTIVE AUDIT: Required certifications found in the text: ${JSON.stringify(requiredCerts)}. Check EVERY item; emit one SEPARATE FATAL trap for EACH certification the bidder lacks. Never stop at the first.
+7. LEGAL LOGIC: A startup EXEMPTION clause ("dispensées de fournir les bilans", "exempted") is NOT a reservation. Only emit TRAP-STARTUP-RESERVATION if the text says "réservé exclusivement aux start-up". Deterministic classification: ${JSON.stringify(startupClauses)}.
 `;
 
     let gemmaPass2Thought = '';

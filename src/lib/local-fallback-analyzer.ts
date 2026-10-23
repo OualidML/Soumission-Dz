@@ -1,4 +1,5 @@
 import { TenderData, CompanyProfile, Pass1Result, Pass2Critic, BpuAuditSummary, FatalTrap } from './types';
+import { checkCertifications, checkTurnover, classifyStartupClauses } from './requirement-checks';
 
 /**
  * Dynamic Deterministic Legal & Requirement Analyzer (Loi n° 23-12).
@@ -96,6 +97,7 @@ export function runDeterministicLocalAnalysis(
     combinedText.includes('article 87') ||
     combinedText.includes('jeune entreprise innovante');
 
+  const startupClauses = classifyStartupClauses(tenderData.RawText || '');
   // Only create a RESERVATION trap if the tender is EXCLUSIVELY reserved for startups
   const isStartupReserved =
     /r[ee]serv[ee]\s+exclusivement\s+aux\s+start[-\s]?up/i.test(tenderData.RawText || '') ||
@@ -130,69 +132,23 @@ export function runDeterministicLocalAnalysis(
   const cnasCasnosUpToDate = Boolean(companyProfile?.cnasCasnosUpdated);
   const roleStatus = String(companyProfile?.extraitDeRoleStatus || '').toLowerCase();
 
-  // A. ISO 14001 Check
+  // A. EXHAUSTIVE CERTIFICATION AUDIT — one FATAL trap per missing certificate (never stops at the first)
+  const certAudit = checkCertifications(tenderData.RawText || '', companyProfile);
   const hasIso14001 = certs.some((c) => c.toLowerCase().includes('14001'));
-  if (requiresIso14001 && !hasIso14001) {
-    eliminationRiskPercent += 65;
-    fatalTraps.push({
-      trapId: 'TRAP-ISO14001-FATAL',
-      severity: 'FATAL',
-      cause: 'Absence du certificat de management environnemental ISO 14001 requis expressément par le Cahier des Charges dans le Dossier de Candidature.',
-      legalBasis: 'Loi n° 23-12 Art. 47 & Clause éliminatoire expresse du Cahier des Charges.',
-      correctionRequired: 'Obtenir la certification ISO 14001 ou constituer un groupement solidaire avec un partenaire certifié avant l\'ouverture des plis.',
-    });
-  }
-
-  // B. ISO 9001 Check
   const hasIso9001 = certs.some((c) => c.toLowerCase().includes('9001'));
-  if (requiresIso9001 && !hasIso9001) {
-    eliminationRiskPercent += 25;
-    fatalTraps.push({
-      trapId: 'TRAP-ISO9001-DEFECT',
-      severity: 'HIGH',
-      cause: 'Certificat de management de la qualité ISO 9001 exigé par le document non fourni.',
-      legalBasis: 'Loi n° 23-12 Art. 47 & Spécifications du Cahier des Charges.',
-      correctionRequired: 'Fournir l\'attestation de certification ISO 9001 en cours de validité.',
-    });
-  }
-
-  // C2. ISO 27001 Check (Information Security - Cybersecurity tenders)
   const hasIso27001 = certs.some((c) => c.toLowerCase().includes('27001'));
-  if (requiresIso27001 && !hasIso27001) {
-    eliminationRiskPercent += 60;
-    fatalTraps.push({
-      trapId: 'TRAP-ISO27001-FATAL',
-      severity: 'FATAL',
-      cause: "Absence du certificat de management de la sécurité de l'information ISO/IEC 27001 requis expressément par le Cahier des Charges.",
-      legalBasis: 'Loi n\u00b0 23-12 Art. 47 & Clause \u00e9liminatoire expresse du Cahier des Charges.',
-      correctionRequired: "Obtenir la certification ISO 27001 ou constituer un groupement solidaire avec un partenaire certifié avant l'ouverture des plis.",
-    });
-  }
-
-  // C3. CISSP Check (Cybersecurity qualification)
   const hasCissp = certs.some((c) => c.toLowerCase().includes('cissp'));
-  if (requiresCissp && !hasCissp) {
-    eliminationRiskPercent += 50;
-    fatalTraps.push({
-      trapId: 'TRAP-CISSP-FATAL',
-      severity: 'FATAL',
-      cause: 'Certification CISSP (Certified Information Systems Security Professional) requise pour les experts affect\u00e9s au march\u00e9 et non fournie.',
-      legalBasis: 'Loi n\u00b0 23-12 Art. 47 & Sp\u00e9cifications techniques du Cahier des Charges.',
-      correctionRequired: 'Fournir les certificats CISSP des experts cybers\u00e9curit\u00e9 d\u00e9sign\u00e9s dans le dossier technique (CV + dipl\u00f4mes).',
-    });
+  const hasCeh = certs.some((c) => /\bceh\b|ethical hacker/.test(c.toLowerCase()));
+  for (const trap of certAudit.traps) {
+    eliminationRiskPercent += 40;
+    fatalTraps.push(trap);
   }
 
-  // C4. CEH Check (Ethical Hacker certification)
-  const hasCeh = certs.some((c) => c.toLowerCase().includes('ceh') || c.toLowerCase().includes('ethical hacker'));
-  if (requiresCeh && !hasCeh) {
-    eliminationRiskPercent += 40;
-    fatalTraps.push({
-      trapId: 'TRAP-CEH-DEFECT',
-      severity: 'HIGH',
-      cause: 'Certification CEH (Certified Ethical Hacker) requise pour les auditeurs de s\u00e9curit\u00e9 d\u00e9sign\u00e9s et non fournie.',
-      legalBasis: 'Loi n\u00b0 23-12 Art. 47 & Sp\u00e9cifications techniques du Cahier des Charges.',
-      correctionRequired: "Fournir les certificats CEH des auditeurs de sécurité désignés dans l'Enveloppe B (Offre Technique).",
-    });
+  // B. NUMERICAL COMPARISON — Required turnover (PDF) vs actual turnover (profile)
+  const turnoverTrap = checkTurnover(tenderData.RawText || '', companyProfile);
+  if (turnoverTrap) {
+    eliminationRiskPercent += 60;
+    fatalTraps.push(turnoverTrap);
   }
 
   // C. CACOBATPH Check
@@ -257,29 +213,23 @@ export function runDeterministicLocalAnalysis(
     });
   }
 
-  // G. Startup Exemption vs Reservation Check
-  if (mentionsStartup) {
-    if (isStartup) {
-      exemptionsApplied.push({
-        exemptionTitle: 'Exonération des bilans financiers triennaux & références antérieures',
-        legalBasis: 'Loi n° 23-12 du 5 août 2023, Article 87 relatif à la promotion des Start-ups labellisées.',
-        impact: 'Dispense légale totale de présenter 3 années de bilans certifiés par CAC. Le Label Start-up suffit.',
-      });
-      exemptionsApplied.push({
-        exemptionTitle: 'Dispense d\'affiliation BTPH / CACOBATPH pour prestations immatérielles',
-        legalBasis: 'Loi n° 23-12 Art. 87 & Décret exécutif secteur TIC.',
-        impact: 'Aucune pénalité administrative pour l\'absence d\'attestation CACOBATPH.',
-      });
-    } else {
-      eliminationRiskPercent += 35;
-      fatalTraps.push({
-        trapId: 'TRAP-STARTUP-RESERVATION',
-        severity: 'HIGH',
-        cause: 'La consultation est réservée prioritairement aux Start-ups labellisées. Le soumissionnaire ne détient pas ce statut.',
-        legalBasis: 'Loi n° 23-12 Art. 87.',
-        correctionRequired: 'Présenter la preuve du Label Start-up ou postuler sous groupement avec une entité labellisée.',
-      });
-    }
+  // G. Startup legal logic: EXEMPTION (dispense) is NOT a RESERVATION
+  if (startupClauses.isReservation && !isStartup) {
+    eliminationRiskPercent += 60;
+    fatalTraps.push({
+      trapId: 'TRAP-STARTUP-RESERVATION',
+      severity: 'FATAL',
+      cause: 'Le march\u00e9 est r\u00e9serv\u00e9 exclusivement aux Start-ups labellis\u00e9es. Le soumissionnaire ne d\u00e9tient pas ce label.',
+      legalBasis: 'Loi n\u00b0 23-12 Art. 87 & clause de r\u00e9servation expresse du Cahier des Charges.',
+      correctionRequired: 'Pr\u00e9senter le Label Start-up ou renoncer \u00e0 la soumission.',
+    });
+  }
+  if ((startupClauses.isExemption || startupClauses.isReservation) && isStartup) {
+    exemptionsApplied.push({
+      exemptionTitle: 'Exon\u00e9ration des bilans financiers triennaux & r\u00e9f\u00e9rences ant\u00e9rieures',
+      legalBasis: 'Loi n\u00b0 23-12 du 5 ao\u00fbt 2023, Article 87 (Start-ups labellis\u00e9es).',
+      impact: 'CONFORME : dispense l\u00e9gale appliqu\u00e9e, le Label Start-up remplace les bilans/r\u00e9f\u00e9rences.',
+    });
   }
 
   // H. Merge Explicit Eliminatory Clauses found in text
