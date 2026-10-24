@@ -1,5 +1,5 @@
 import { TenderData, CompanyProfile, Pass1Result, Pass2Critic, BpuAuditSummary, FatalTrap } from './types';
-import { checkCertifications, checkTurnover, classifyStartupClauses } from './requirement-checks';
+import { checkCertifications, checkTurnover, classifyStartupClauses, profileHasCert } from './requirement-checks';
 
 /**
  * Dynamic Deterministic Legal & Requirement Analyzer (Loi n° 23-12).
@@ -163,7 +163,7 @@ export function runDeterministicLocalAnalysis(
     });
   }
 
-  // D. BPU Arithmetic & Data Presence Check
+  // D. BPU Arithmetic & Data Presence Check (BPU-DQE Cross-Check)
   if (bpuAudit.status === 'BPU_DATA_NOT_FOUND' || bpuAudit.lines.length === 0) {
     eliminationRiskPercent += 30;
     fatalTraps.push({
@@ -173,8 +173,8 @@ export function runDeterministicLocalAnalysis(
       legalBasis: 'Loi n° 23-12 Art. 47 & 72 (Obligation de fournir une offre financière chiffrée et vérifiable).',
       correctionRequired: 'Saisir ou formater les lignes du BPU (Désignation, Quantité, Prix unitaire HT) pour permettre le contrôle arithmétique COPEO.',
     });
-  } else if (bpuAudit.hasErrors) {
-    eliminationRiskPercent += 30;
+  } else if (bpuAudit.hasErrors || bpuAudit.status === 'ARITHMETIC_ERROR') {
+    eliminationRiskPercent += 40;
     for (const err of bpuAudit.errorDescriptions) {
       fatalTraps.push({
         trapId: 'TRAP-BPU-ARITHMETIC',
@@ -184,6 +184,14 @@ export function runDeterministicLocalAnalysis(
         correctionRequired: 'Corriger l\'addition du BPU/DQE pour rétablir la stricte concordance arithmétique.',
       });
     }
+  } else if (bpuAudit.status === 'UNVERIFIED') {
+    fatalTraps.push({
+      trapId: 'TRAP-BPU-UNVERIFIED',
+      severity: 'HIGH',
+      cause: bpuAudit.unverifiedMessage || 'BPU Non Corroboré : Aucun Montant Total HT n\'a été trouvé au bas du document pour certifier la somme des prestations.',
+      legalBasis: 'Loi n° 23-12 Art. 72 & Contrôle de cohérence de l\'Offre Financière.',
+      correctionRequired: 'Mentionner expressément le Total Général HT en chiffres et en lettres au bas du Bordereau des Prix Unitaires.',
+    });
   }
 
   // E. Social Security (CNAS & CASNOS) Check (Mandatory for ALL tenders)
@@ -388,7 +396,40 @@ export function runDeterministicLocalAnalysis(
       required: true,
       isEliminatory: false,
       status: hasCeh ? ('COMPLIANT' as const) : ('NON_COMPLIANT' as const),
-      details: hasCeh ? 'Certification CEH fournie.' : 'VIGILANCE : Certification CEH recommand\u00e9e pour les auditeurs de s\u00e9curit\u00e9.',
+      details: hasCeh ? 'Certification CEH fournie.' : 'VIGILANCE : Certification CEH recommandée pour les auditeurs de sécurité.',
+    });
+  }
+
+  // MAF Check (Algérie Télécom mandatory hardware qualification)
+  const requiresMaf = certAudit.required.includes('MAF') || /\bMAF\b|mat[ée]riel\s+agr[ée][ée]/i.test(combinedText);
+  const hasMaf = profileHasCert(certs, 'MAF');
+  if (requiresMaf) {
+    envelopeAItems.push({
+      id: 'A-MAF',
+      label: 'Agrément de Matériel / Homologation (MAF Algérie Télécom) en cours de validité',
+      legalReference: 'Loi n° 23-12 Art. 47 & Clause éliminatoire expresse du Cahier des Charges',
+      required: true,
+      isEliminatory: true,
+      status: hasMaf ? ('COMPLIANT' as const) : ('NON_COMPLIANT' as const),
+      details: hasMaf
+        ? 'Agrément de matériel (MAF) en cours de validité fourni.'
+        : 'MANQUANT : Agrément de matériel (MAF) requis obligatoirement sous peine d\'élimination.',
+    });
+  }
+
+  // ISO 9001 Check
+  const requiresIso9001Check = certAudit.required.includes('ISO 9001') || combinedText.includes('9001');
+  if (requiresIso9001Check && !envelopeAItems.some((i) => i.id === 'A-ISO9001')) {
+    envelopeAItems.push({
+      id: 'A-ISO9001',
+      label: 'Certification ISO 9001 (Management de la Qualité) en cours de validité',
+      legalReference: 'Loi n° 23-12 Art. 47 & Clause éliminatoire expresse',
+      required: true,
+      isEliminatory: true,
+      status: hasIso9001 ? ('COMPLIANT' as const) : ('NON_COMPLIANT' as const),
+      details: hasIso9001
+        ? 'Certification ISO 9001 fournie.'
+        : 'MANQUANT : Certification ISO 9001 requise sous peine d\'élimination et non fournie.',
     });
   }
 
@@ -431,7 +472,12 @@ export function runDeterministicLocalAnalysis(
     },
   ];
 
-  const hasBpuDefect = bpuAudit.status === 'BPU_DATA_NOT_FOUND' || bpuAudit.hasErrors;
+  const hasBpuDefect =
+    bpuAudit.status === 'BPU_DATA_NOT_FOUND' ||
+    bpuAudit.status === 'ARITHMETIC_ERROR' ||
+    bpuAudit.hasErrors;
+  const isBpuUnverified = bpuAudit.status === 'UNVERIFIED';
+
   const envelopeCItems = [
     {
       id: 'C-01',
@@ -448,12 +494,18 @@ export function runDeterministicLocalAnalysis(
       legalReference: 'Loi n° 23-12 Art. 47 & 72',
       required: true,
       isEliminatory: true,
-      status: hasBpuDefect ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
+      status: hasBpuDefect
+        ? ('NON_COMPLIANT' as const)
+        : isBpuUnverified
+        ? ('WARNING' as const)
+        : ('COMPLIANT' as const),
       details:
         bpuAudit.status === 'BPU_DATA_NOT_FOUND'
           ? 'BPU Data Not Found : Aucun bordereau exploitable extrait du document.'
-          : bpuAudit.hasErrors
-          ? 'Anomalie arithmétique détectée sur les sous-totaux.'
+          : bpuAudit.hasErrors || bpuAudit.status === 'ARITHMETIC_ERROR'
+          ? 'Anomalie arithmétique détectée sur les totaux.'
+          : isBpuUnverified
+          ? 'UNVERIFIED : Prix unitaires extraits mais aucun Total HT déclaré trouvé au bas du document.'
           : 'Prix unitaires vérifiés et conformes.',
     },
     {
@@ -462,10 +514,16 @@ export function runDeterministicLocalAnalysis(
       legalReference: 'Loi n° 23-12 Art. 47',
       required: true,
       isEliminatory: true,
-      status: hasBpuDefect ? ('NON_COMPLIANT' as const) : ('COMPLIANT' as const),
+      status: hasBpuDefect
+        ? ('NON_COMPLIANT' as const)
+        : isBpuUnverified
+        ? ('WARNING' as const)
+        : ('COMPLIANT' as const),
       details:
         bpuAudit.status === 'BPU_DATA_NOT_FOUND'
           ? 'BPU Data Not Found : Offre financière non vérifiable arithmétiquement.'
+          : isBpuUnverified
+          ? `Total calculé : ${bpuAudit.computedGrandTotalHT.toLocaleString('fr-DZ')} DA HT (non corroboré).`
           : `Total TTC calculé : ${bpuAudit.grandTotalTTC.toLocaleString('fr-DZ')} DA.`,
     },
   ];

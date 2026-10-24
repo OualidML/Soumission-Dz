@@ -962,19 +962,27 @@ export default function HomePage() {
                           {result.bpuAudit.notFoundMessage || "Aucun tableau de bordereau des prix unitaires structuré n'a été extrait du document pour vérification arithmétique."}
                         </Typography>
                       </Stack>
-                    ) : result.bpuAudit.hasErrors ? (
+                    ) : result.bpuAudit.status === 'ARITHMETIC_ERROR' || result.bpuAudit.hasErrors ? (
                       <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ p: 1.5, bgcolor: NERO.dangerSoft, border: '1px solid rgba(179,38,30,0.22)', borderRadius: 2.5 }}>
                         <WarningAmberIcon sx={{ color: NERO.danger, fontSize: 18, mt: 0.1 }} />
                         <Typography sx={{ fontSize: 11.5, color: NERO.danger }}>
                           <Box component="span" sx={{ fontWeight: 800 }}>Anomalie financière : </Box>
-                          écart de {Math.abs(result.bpuAudit.grandDiscrepancyHT).toLocaleString('fr-DZ')} DA entre montant déclaré et calculé.
+                          {result.bpuAudit.errorDescriptions[0] || `écart de ${Math.abs(result.bpuAudit.grandDiscrepancyHT).toLocaleString('fr-DZ')} DA entre montant déclaré et calculé.`}
+                        </Typography>
+                      </Stack>
+                    ) : result.bpuAudit.status === 'UNVERIFIED' ? (
+                      <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ p: 1.5, bgcolor: '#FFF8E1', border: '1px solid rgba(255,179,0,0.4)', borderRadius: 2.5 }}>
+                        <WarningAmberIcon sx={{ color: '#F57F17', fontSize: 18, mt: 0.1, flexShrink: 0 }} />
+                        <Typography sx={{ fontSize: 11.5, color: '#B7791F' }}>
+                          <Box component="span" sx={{ fontWeight: 800 }}>BPU Non Corroboré (UNVERIFIED) : </Box>
+                          {result.bpuAudit.unverifiedMessage || "Aucun Total HT global déclaré n'a été trouvé au bas du document pour certifier la somme des lignes."}
                         </Typography>
                       </Stack>
                     ) : (
                       <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 1.5, bgcolor: NERO.successSoft, border: '1px solid rgba(31,122,85,0.2)', borderRadius: 2.5 }}>
                         <CheckCircleOutlineIcon sx={{ color: NERO.success, fontSize: 18 }} />
                         <Typography sx={{ fontSize: 11.5, color: NERO.success, fontWeight: 600 }}>
-                          Intégrité arithmétique validée (zéro écart).
+                          Intégrité arithmétique validée & Total HT corroboré (zéro écart).
                         </Typography>
                       </Stack>
                     )}

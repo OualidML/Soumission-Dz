@@ -40,8 +40,10 @@ export interface BpuAuditSummary {
   hasErrors: boolean;
   criticalErrorsCount: number;
   errorDescriptions: string[];
-  status?: 'AUDITED' | 'BPU_DATA_NOT_FOUND';
+  status?: 'AUDITED' | 'BPU_DATA_NOT_FOUND' | 'UNVERIFIED' | 'ARITHMETIC_ERROR';
+  declaredGrandTotalHT?: number | null;
   notFoundMessage?: string;
+  unverifiedMessage?: string;
 }
 
 export interface CompanyProfile {

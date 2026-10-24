@@ -3,7 +3,7 @@ import { loadSkillBySlug } from '@/lib/skill-loader';
 import { auditBpuItems } from '@/lib/bpu-math';
 import { callGemma4, parseSafeJson } from '@/lib/gemma-client';
 import { runDeterministicLocalAnalysis } from '@/lib/local-fallback-analyzer';
-import { extractBpuHeuristic } from '@/lib/bpu-heuristic';
+import { extractBpuHeuristic, isExcludedBpuLine, isYearOrReferenceAmount, isValidBpuDesignation } from '@/lib/bpu-heuristic';
 import { extractRequiredTurnover, extractRequiredCerts, classifyStartupClauses } from '@/lib/requirement-checks';
 import { TenderData, CompanyProfile, AnalysisResponse, FatalTrap, BpuItem } from '@/lib/types';
 
@@ -98,7 +98,8 @@ function extractBpuStructured(text: string): BpuItem[] | null {
   for (const rawLine of scanLines) {
     const line = rawLine.trim();
     if (!line || line.length < 5) continue;
-    if (isLegalCitationLine(line)) continue;
+    // 1. The "Footer/Header" Guard: instantly discard footers, headers, references, statutes
+    if (isLegalCitationLine(line) || isExcludedBpuLine(line)) continue;
 
     // Strategy A: Pipe-delimited table row: "01 | Designation | 1 | 4,500,000 | 4,500,000"
     if (line.includes('|')) {
@@ -106,16 +107,29 @@ function extractBpuStructured(text: string): BpuItem[] | null {
       if (parts.length >= 4) {
         const maybeCode = parts[0];
         const maybeDesig = parts[1];
-        // Find last 3 numeric columns (qty, unitPrice, total)
-        const numericParts = parts.slice(2).map((p) => parseAlgerianNumber(p)).filter((n) => n > 0);
+        // 2. The "Structure" Guard: must have a real textual designation
+        if (!isValidBpuDesignation(maybeDesig)) continue;
+
+        // 3. The "Amount" Guard: ignore bare years (2026) and noise
+        const numericParts = parts
+          .slice(2)
+          .map((p) => parseAlgerianNumber(p))
+          .filter((n) => n > 0 && !isYearOrReferenceAmount(n));
+
         if (numericParts.length >= 2) {
           const qty = numericParts[0] <= 10000 ? numericParts[0] : 1;
           const unitPriceHT = numericParts[1] >= 100 ? numericParts[1] : numericParts[numericParts.length - 1];
           const claimedTotalHT = numericParts.length >= 3 ? numericParts[2] : qty * unitPriceHT;
-          // Only add if unit price is realistic (>= 100 DA)
-          if (unitPriceHT >= 100) {
+
+          if (
+            unitPriceHT >= 100 &&
+            !isYearOrReferenceAmount(unitPriceHT) &&
+            !isYearOrReferenceAmount(claimedTotalHT)
+          ) {
             items.push({
-              code: /^\d+$/.test(maybeCode) ? `BPU-${maybeCode.padStart(2, '0')}` : maybeCode || `BPU-${String(index).padStart(2, '0')}`,
+              code: /^\d+$/.test(maybeCode)
+                ? `BPU-${maybeCode.padStart(2, '0')}`
+                : maybeCode || `BPU-${String(index).padStart(2, '0')}`,
               designation: maybeDesig.slice(0, 80),
               unit: parts.find((p) => /^(U|FF|ML|M²|M³|KG|T|J|H|ENS|FT)$/i.test(p)) || 'U',
               qty,
@@ -132,18 +146,30 @@ function extractBpuStructured(text: string): BpuItem[] | null {
 
     // Strategy B: Numeric-rich line without pipe (tab or space separated)
     const numberTokens = line.match(/\d[\d\s,.]*\d|\d+/g) || [];
-    const parsedNums = numberTokens.map(parseAlgerianNumber).filter((n) => n >= 100);
+    const parsedNums = numberTokens
+      .map(parseAlgerianNumber)
+      .filter((n) => n >= 100 && !isYearOrReferenceAmount(n));
+
     if (parsedNums.length >= 2) {
-      // Extract designation: everything before the first large number
       const firstNumIdx = line.search(/\d[\d\s,.]*\d|\d+/);
-      const designation = line.slice(0, firstNumIdx).replace(/^[\d.\-|]+\s*/, '').trim().slice(0, 80);
-      if (!designation || designation.length < 3) continue;
+      const designation = line
+        .slice(0, firstNumIdx)
+        .replace(/^[\d.\-|]+\s*/, '')
+        .trim()
+        .slice(0, 80);
+
+      // 2. The "Structure" Guard: must be a genuine service/item designation
+      if (!isValidBpuDesignation(designation)) continue;
 
       const qty = parsedNums[0] <= 10000 ? parsedNums[0] : 1;
       const unitPriceHT = parsedNums.length >= 2 ? parsedNums[1] : parsedNums[0];
       const claimedTotalHT = parsedNums.length >= 3 ? parsedNums[parsedNums.length - 1] : qty * unitPriceHT;
 
-      if (unitPriceHT >= 100) {
+      if (
+        unitPriceHT >= 100 &&
+        !isYearOrReferenceAmount(unitPriceHT) &&
+        !isYearOrReferenceAmount(claimedTotalHT)
+      ) {
         items.push({
           code: `BPU-${String(index).padStart(2, '0')}`,
           designation,
@@ -233,7 +259,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Baseline deterministic legal analysis (Loi n° 23-12 single-source-of-truth)
-    const initialBpuAudit = auditBpuItems(activeBpuItems, tenderData.id);
+    const initialBpuAudit = auditBpuItems(activeBpuItems, tenderData.id, rawTenderText);
     const localBaseline = runDeterministicLocalAnalysis(
       { ...tenderData, RawText: rawTenderText, bpuItems: activeBpuItems },
       companyProfile,
@@ -312,7 +338,7 @@ Mandate:
     // =========================================================================
     // STEP 2 — Deterministic TypeScript BPU Math Engine (Zero Hallucination)
     // =========================================================================
-    const bpuAudit = auditBpuItems(activeBpuItems, tenderData.id);
+    const bpuAudit = auditBpuItems(activeBpuItems, tenderData.id, rawTenderText);
     const bpuMathErrors = bpuAudit.errorDescriptions;
 
     // =========================================================================
@@ -338,6 +364,8 @@ ${JSON.stringify(missingItems, null, 2)}
 Deterministic BPU Math Status:
 Status: ${bpuAudit.status || 'AUDITED'}
 ${bpuAudit.status === 'BPU_DATA_NOT_FOUND' ? 'CRITICAL ALERT: BPU Data Not Found in the document! Financial Offer cannot be verified.' : ''}
+${bpuAudit.status === 'UNVERIFIED' ? 'ALERT: BPU Data extracted but UNVERIFIED against a declared Total HT at table bottom.' : ''}
+${bpuAudit.status === 'ARITHMETIC_ERROR' ? 'CRITICAL ALERT: BPU Arithmetic Error detected in line items or grand total discrepancy!' : ''}
 Deterministic BPU Math Errors / Warnings Found:
 ${JSON.stringify(bpuMathErrors, null, 2)}
 
@@ -350,12 +378,13 @@ ${rawTenderText.slice(0, 5000)}
 Rules:
 1. Every item in missingItems, bpuMathErrors, and any unfulfilled requirement in the tender text MUST appear in your criticalTrapsFound list.
 2. If BPU Data is not found, you MUST flag it as a critical trap in Envelope C.
-3. If missingItems.length > 0 or bpuAudit.hasErrors or bpuAudit.status === 'BPU_DATA_NOT_FOUND', eliminationRiskPercent MUST be >= 15% (triggering CRITICAL_DISQUALIFICATION_WARNING).
+3. If missingItems.length > 0 or bpuAudit.hasErrors or bpuAudit.status === 'BPU_DATA_NOT_FOUND' or bpuAudit.status === 'ARITHMETIC_ERROR', eliminationRiskPercent MUST be >= 15% (triggering CRITICAL_DISQUALIFICATION_WARNING).
 4. If the bidder is a Labelled Startup and the tender allows Loi 23-12 Art. 87 exemptions, confirm the exemptions and verify if risk is under 15%.
 5. NUMERICAL COMPARISON: Convert every numeric threshold to integer DZD and compare with the bidder profile. If actual < required, emit TRAP-FINANCIAL-INSUFFICIENCY (FATAL).
    Deterministic extraction -> Required turnover: ${requiredTurnover ? requiredTurnover.requiredValueDZD + ' DZD' : 'none stated'} | Bidder turnover: ${Math.round(companyProfile.avgAnnualTurnoverDZD || 0)} DZD.
-6. EXHAUSTIVE AUDIT: Required certifications found in the text: ${JSON.stringify(requiredCerts)}. Check EVERY item; emit one SEPARATE FATAL trap for EACH certification the bidder lacks. Never stop at the first.
+6. EXHAUSTIVE MANDATORY AUDIT: Required certifications found in the text: ${JSON.stringify(requiredCerts)}. Check EVERY item; emit one SEPARATE FATAL trap for EACH certification the bidder lacks (e.g. ISO 9001, ISO 27001, ISO 14001, MAF). Never stop at the first.
 7. LEGAL LOGIC: A startup EXEMPTION clause ("dispensées de fournir les bilans", "exempted") is NOT a reservation. Only emit TRAP-STARTUP-RESERVATION if the text says "réservé exclusivement aux start-up". Deterministic classification: ${JSON.stringify(startupClauses)}.
+8. BPU-DQE CROSS-CHECK: If declared Total HT differs from calculated sum by > 1%, emit TRAP-BPU-ARITHMETIC (FATAL). If Total HT is missing from the table bottom, flag as UNVERIFIED.
 `;
 
     let gemmaPass2Thought = '';
