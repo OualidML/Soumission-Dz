@@ -72,25 +72,51 @@ function buildDeterministicMemoire(
  * Handles both multi-line text and pdf.js single-line flattened pages.
  */
 function extractDeterministicBaseline(rawText: string, tenderData?: any) {
-  const text = rawText || '';
+  const text = BpuMathEngine.normalizePdfText(rawText || '');
 
   // 1. Tender Title (multi-line "Objet : ...", stopping cleanly before metadata/section headers)
   const objetMatch = text.match(
-    /Objet\s*(?:du\s+march[eéè])?\s*:\s*([\s\S]{5,350}?)(?=\r?\n\s*(?:Lot\b|Financement\b|Cadre\s+l[eéè]gal\b|R[eéè]f[eéè]rence\b|Ma[îi]tre\s+d['’]ouvrage\b|\d+\.\s+[A-ZÉÈÀ]|PARTIE\s+[I1V]|Article\s+\d)|\s+\d+\.\s+[A-ZÉÈÀ]|\s+SECTION\s+\d|\s+CONFORM[EÉÈ]MENT|\s+Article\s+\d)/i
+    /Objet\s*(?:du\s+march[eéè]|\s*de\s+la\s+consultation|\s*de\s+l['’]appel\s+d['’]offres)?\s*:\s*([\s\S]{5,350}?)(?=\r?\n\s*(?:Lot\b|Financement\b|Cadre\s+l[eéè]gal\b|R[eéè]f[eéè]rence\b|Ma[îi]tre\s+d['’]ouvrage\b|\d+\.\s+[A-ZÉÈÀ]|PARTIE\s+[I1V]|Article\s+\d)|\s+\d+\.\s+[A-ZÉÈÀ]|\s+SECTION\s+\d|\s+CONFORM[EÉÈ]MENT|\s+Article\s+\d)/i
   );
   const tenderTitle =
     objetMatch?.[1]?.replace(/\s+/g, ' ').trim() ||
     (tenderData?.title && !tenderData.title.startsWith('Cahier des Charges —') ? tenderData.title : null) ||
     'Marché Public (Loi n° 23-12)';
 
-  // 2. Tender Reference (from "N° ...")
-  const refMatch = text.match(
-    /(?:AON|AO|CONSULTATION|BAOSEM|APPEL\s+D['’]OFFRES[^N°]{0,30})?\s*N[°o]\s*([A-Z0-9][A-Z0-9\/.-]{3,35})/i
-  );
-  const tenderReference =
-    refMatch?.[1]?.trim() ||
-    (tenderData?.reference && !tenderData.reference.startsWith('DOC-') ? tenderData.reference : null) ||
-    'REF-N/A';
+  // 2. Tender Reference (never match "23-12", "15-247", "18-07", or legal statute numbers)
+  let tenderReference: string | null = null;
+  const explicitRefPatterns = [
+    /R[eéè]f[eéè]rence(?:\s+du\s+march[eéè]|\s+de\s+l['’]appel\s+d['’]offres|\s+du\s+dossier)?\s*[:|-]\s*([A-Z0-9][A-Z0-9\/._-]{3,40})/i,
+    /\b(?:AON|AONO|AONI|AO|CONSULTATION|BAOSEM|BOMOP|APPEL\s+D['’]OFFRES[^\nN°]{0,45}?)\s+N[°o]\s*:?\s*([A-Z0-9][A-Z0-9\/._-]{3,40})/i,
+  ];
+  for (const pat of explicitRefPatterns) {
+    const mRef = text.match(pat);
+    if (mRef?.[1] && !/^(?:23-12|15-247|18-07|95-07)$/i.test(mRef[1].trim())) {
+      tenderReference = mRef[1].trim();
+      break;
+    }
+  }
+  if (!tenderReference) {
+    const genericRefRe = /N[°o]\s*:?\s*([A-Z0-9][A-Z0-9\/._-]{3,40})/gi;
+    let gMatch: RegExpExecArray | null;
+    while ((gMatch = genericRefRe.exec(text)) !== null) {
+      const candidate = gMatch[1].trim();
+      const prefix = text.slice(Math.max(0, gMatch.index - 40), gMatch.index);
+      if (
+        /^(?:23-12|15-247|18-07|95-07|25-0841)$/i.test(candidate) ||
+        /\b(?:Loi|D[eéè]cret|Arr[êe]t[eé]|Ordonnance|Label|Agr[eéè]ment|Certificat)\b/i.test(prefix)
+      ) {
+        continue;
+      }
+      tenderReference = candidate;
+      break;
+    }
+  }
+  if (!tenderReference) {
+    tenderReference =
+      (tenderData?.reference && !tenderData.reference.startsWith('DOC-') ? tenderData.reference : null) ||
+      'REF-N/A';
+  }
 
   // 3. Issuing Authority (explicit "Maître d'ouvrage :" first, then clean header lines)
   let issuingAuthority =
@@ -165,17 +191,41 @@ function extractDeterministicBaseline(rawText: string, tenderData?: any) {
     }
   }
 
-  // 7. Max Deadline Days
+  // 7. Max Deadline Days & Embedded Proposed Deadline Days
   let maxDeadlineDays: number | null = null;
   const deadlineMatch = text.match(
-    /d[eéè]lai\s+(?:d['’]ex[eéè]cution|de\s+livraison|global|maximal)[^.\n]{0,60}?(\d{1,4})\s*(jours?|mois)/i
+    /d[eéè]lai\s+(?:d['’]ex[eéè]cution|de\s+livraison|global|maximal|contractuel|imparti)[^.\n]{0,70}?(\d{1,4})\s*(jours?|mois)/i
   );
   if (deadlineMatch) {
     const num = parseInt(deadlineMatch[1], 10);
     maxDeadlineDays = /mois/i.test(deadlineMatch[2]) ? num * 30 : num;
   }
 
-  // 8. Declared Total HT
+  let proposedDeadlineDays: number | null = null;
+  const propDeadlineMatch = text.match(
+    /(?:d[eéè]lai\s+propos[eéè]|dur[eéè]e\s+(?:totale\s+)?propos[eéè]e|planning\s+(?:propos[eéè]|soumis|d['’]ex[eéè]cution\s+propos[eéè])|calendrier\s+propos[eéè]|offre\s+du\s+soumissionnaire[^.\n]{0,40}?d[eéè]lai)[^.\n]{0,70}?(\d{1,4})\s*(jours?|mois)/i
+  );
+  if (propDeadlineMatch) {
+    const num = parseInt(propDeadlineMatch[1], 10);
+    proposedDeadlineDays = /mois/i.test(propDeadlineMatch[2]) ? num * 30 : num;
+  }
+
+  // 8. Envelope B Text (Technical Offer / Enveloppe B content & any financial leak in Envelope B)
+  let envelopeBText = '';
+  const envBSectionMatch = text.match(
+    /(?:ENVELOPPE\s+B\b|2\s*[\).]\s*OFFRE\s+TECHNIQUE|DOSSIER\s+TECHNIQUE\s+SOUMIS|EXTRAIT\s+DE\s+L['’]OFFRE\s+TECHNIQUE|M[EÉÈ]MOIRE\s+TECHNIQUE\s+DU\s+SOUMISSIONNAIRE)([\s\S]{10,2500}?)(?=(?:ENVELOPPE\s+C\b|3\s*[\).]\s*OFFRE\s+FINANCI[EÈ]RE|OFFRE\s+FINANCI[EÈ]RE|BORDEREAU\s+DES\s+PRIX|D[EÉÈ]TAIL\s+QUANTITATIF|ANNEXE\s+\d|$))/i
+  );
+  if (envBSectionMatch?.[1]) {
+    envelopeBText = envBSectionMatch[1].trim();
+  }
+  const explicitLeakMatch = text.match(
+    /[^\r\n]*(?:enveloppe\s+B|offre\s+technique|m[eéè]moire\s+technique)[^\r\n]{0,140}?\b\d[\d\s.,]*\s*(?:millions?\s*(?:de\s*)?)?(?:DA|DZD|Dinars?)\b[^\r\n]*/i
+  );
+  if (explicitLeakMatch?.[0] && !envelopeBText.includes(explicitLeakMatch[0])) {
+    envelopeBText = `${envelopeBText}\n${explicitLeakMatch[0]}`.trim();
+  }
+
+  // 9. Declared Total HT
   const declaredTotalHT = BpuMathEngine.extractDeclaredTotalHT(text);
 
   return {
@@ -186,8 +236,9 @@ function extractDeterministicBaseline(rawText: string, tenderData?: any) {
     requiredCategory,
     requiredCertifications: Array.from(certs),
     maxDeadlineDays,
+    proposedDeadlineDays,
     declaredTotalHT,
-    envelopeBText: '',
+    envelopeBText,
   };
 }
 
@@ -195,12 +246,13 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { companyProfile, tenderData } = body;
-    const rawTenderText =
+    const rawInputText =
       body.rawTenderText ||
       body.rawText ||
       body.tenderData?.RawText ||
       body.tenderData?.rawText ||
       '';
+    const rawTenderText = BpuMathEngine.normalizePdfText(rawInputText);
 
     if (!rawTenderText && (!tenderData?.bpuItems || tenderData.bpuItems.length === 0)) {
       return NextResponse.json({ error: 'No tender text provided' }, { status: 400 });
@@ -254,7 +306,9 @@ export async function POST(req: Request) {
     );
 
     const resolvedReference =
-      parsed?.tenderReference && parsed.tenderReference !== 'N/A'
+      parsed?.tenderReference &&
+      parsed.tenderReference !== 'N/A' &&
+      !/^(?:23-12|15-247|18-07|95-07)$/i.test(String(parsed.tenderReference).trim())
         ? parsed.tenderReference
         : baseline.tenderReference;
     const resolvedAuthority =
@@ -311,11 +365,18 @@ export async function POST(req: Request) {
       typeof rawTurnover === 'number' && !Number.isNaN(rawTurnover) ? rawTurnover : null;
 
     const rawProposedDeadline =
-      companyProfile?.proposedDeadlineDays ?? companyProfile?.proposedDeadline ?? null;
+      companyProfile?.proposedDeadlineDays ??
+      companyProfile?.proposedDeadline ??
+      baseline.proposedDeadlineDays ??
+      null;
     const proposedDeadlineDays =
       typeof rawProposedDeadline === 'number' && !Number.isNaN(rawProposedDeadline)
         ? rawProposedDeadline
         : null;
+
+    const combinedEnvelopeBText = [parsed?.envelopeBText, baseline.envelopeBText]
+      .filter((s) => typeof s === 'string' && s.trim().length > 0)
+      .join('\n');
 
     const auditInput: ExtractedTenderData = {
       requiredTurnover:
@@ -333,7 +394,7 @@ export async function POST(req: Request) {
         ? companyProfile.certifications
         : [],
       proposedDeadlineDays,
-      envelopeBText: extractedData.envelopeBText || '',
+      envelopeBText: combinedEnvelopeBText,
       isStartup: Boolean(companyProfile?.startupLabel),
     };
 

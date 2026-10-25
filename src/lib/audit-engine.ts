@@ -150,9 +150,14 @@ export class AuditEngine {
     }
 
     // 5. ANONYMITY LEAK (The "Financial Leak" in Envelope B)
-    // Search for "DA", "DZD", "Dinars" followed by numbers in the technical offer
-    const priceLeakRegex = /(DA|DZD|Dinars)\s*[:=]?\s*\d+([.,]\d+)?\s*(million|M|milliard|Mrd)?/i;
-    if (priceLeakRegex.test(data.envelopeBText)) {
+    // Search for numbers with "DA", "DZD", "Dinars" (either before or after the amount) in the technical offer
+    const cleanEnvB = (data.envelopeBText || '').replace(
+      /[^.\n]*\b(?:ne\s+doit\s+(?:en\s+aucun\s+cas\s+)?(?:contenir|comporter|mentionner|inclure|faire\s+appara[îi]tre)|aucun(?:e)?\s+(?:indication\s+de\s+)?(?:prix|montant)|sans\s+indication\s+de\s+prix)[^.\n]*/gi,
+      ''
+    );
+    const priceLeakRegex =
+      /(?:\b(?:DA|DZD|Dinars?)\s*[:=]?\s*\d[\d\s.,]*|\b\d[\d\s.,]*\d\s*(?:millions?\s*(?:de\s*)?|milliards?\s*(?:de\s*)?|M\s*)?(?:DA|DZD|Dinars?)\b)/i;
+    if (priceLeakRegex.test(cleanEnvB)) {
       findings.push({
         id: 'TRAP-ANONYMITY-VIOLATION',
         level: 'FATAL',

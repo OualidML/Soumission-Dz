@@ -68,6 +68,69 @@ export class BpuMathEngine {
   ];
 
   /**
+   * Decodes PDF Private Use Area (PUA) Unicode digits (\uE071-\uE07A -> 0-9, \uE093 -> ',', \uE094 -> '.')
+   * and rejoins kerning-split French words and numbers.
+   */
+  static normalizePdfText(raw: string): string {
+    if (!raw) return '';
+    // 1. Decode PUA Unicode digits (\uE071-\uE07A -> 0-9, \uE093 -> ',', \uE094 -> '.')
+    const puaMap: Record<string, string> = {
+      '\uE071': '0',
+      '\uE072': '1',
+      '\uE073': '2',
+      '\uE074': '3',
+      '\uE075': '4',
+      '\uE076': '5',
+      '\uE077': '6',
+      '\uE078': '7',
+      '\uE079': '8',
+      '\uE07A': '9',
+      '\uE093': ',',
+      '\uE094': '.',
+      '\uE091': '(',
+      '\uE092': ')',
+    };
+    let text = raw.replace(/[\uE071-\uE094]/g, (ch) => puaMap[ch] ?? ch);
+
+    // 2. Collapse kerning spaces inside decimal endings ("0 , 0 0" -> "0,00") and single-digit runs ("1 8 5 0 0 0 0 0,00")
+    text = text.replace(/(\d)\s*,\s*(\d)\s*(\d)\b/g, '$1,$2$3');
+    text = text.replace(/(\d)\s*,\s*(\d{2})\b/g, '$1,$2');
+    // Collapse spaces inside numbers that explicitly end with ",00" or ".00" (e.g. "18 500 000,00" -> "18500000,00")
+    text = text.replace(/\b\d(?:[ \t\u00a0\u202f]+\d)+(?=,\d{2}\b)/g, (m) => m.replace(/\s+/g, ''));
+    // Collapse single-digit kerning runs of 3+ single digits ("4 5 0" -> "450", "2 0 2 6" -> "2026")
+    text = text.replace(/\b\d(?:[ \t]+\d){2,}\b/g, (m) => m.replace(/[ \t]+/g, ''));
+    text = text.replace(/\b(\d)[ \t]+(\d)\s*-\s*(\d)[ \t]+(\d)\b/g, '$1$2-$3$4');
+    text = text.replace(/\b(0)[ \t]+([1-9])\b/g, '$1$2');
+    text = text.replace(/\b(1)[ \t]+(9)\s*%/g, '19%');
+
+    // 3. Rejoin kerning-split French/procurement words on each line
+    const fixKerningLine = (line: string): string => {
+      if (!/(?:[A-Za-zÀ-ÿ]\s){3,}/.test(line)) return line;
+      let s = line
+        .replace(/\s{2,}/g, ' \u0007 ')
+        .replace(/([A-Za-zÀ-ÿ])\s+(?=[A-Za-zÀ-ÿ])/g, '$1')
+        .replace(/\s*\u0007\s*/g, ' ');
+      return s;
+    };
+    text = text.split(/\r?\n/).map(fixKerningLine).join('\n');
+
+    // 4. Clean common residual split tokens
+    text = text
+      .replace(/\bI\s*SO\b/gi, 'ISO')
+      .replace(/\bI\s*EC\b/gi, 'IEC')
+      .replace(/\bB\s*PU\b/gi, 'BPU')
+      .replace(/\bD\s*Q\s*E\b/gi, 'DQE')
+      .replace(/\bT\s*V\s*A\b/gi, 'TVA')
+      .replace(/\bH\s*T\b/gi, 'HT')
+      .replace(/\bT\s*T\s*C\b/gi, 'TTC')
+      .replace(/\bD\s*A\b/g, 'DA')
+      .replace(/\bC\s*OP\s*E\s*O\b/gi, 'COPEO')
+      .replace(/\bA\s*RP\s*C\s*E\b/gi, 'ARPCE');
+
+    return text;
+  }
+
+  /**
    * Smart Algerian/French/International number parser.
    * - "4,500,000" -> 4500000 | "12,000" -> 12000
    * - "3.000.000" -> 3000000 | "2.000"  -> 2000
@@ -153,8 +216,11 @@ export class BpuMathEngine {
     if (/^DOCUMENT\s+FICTIF/i.test(trimmed)) return true;
     if (/^AON\s+N[°o]/i.test(trimmed)) return true;
 
-    // If the line starts with a valid item code (e.g. "1.1", "01", "LOT-01"), only exclude if it's a section title like "LOT 1 —"
-    const startsWithItemCode = /^(?:LOT-|ITEM-|BPU-|MOD-)?\d{1,2}(?:\.\d{1,2})?(?:\s+|\|)/i.test(trimmed);
+    // If the line starts with a valid item code (e.g. "1.1", "01", "Poste 01", "LOT-01"), only exclude if it's a section title like "LOT 1 —"
+    const startsWithItemCode =
+      /^(?:(?:POSTE|LOT|ITEM|BPU|MOD)[\s:-]*\d{1,2}(?:\.\d{1,2})?|\d{1,2}\.\d{1,2}|(?:0[1-9]|[1-4]\d))(?:\s+|\||:|-)/i.test(
+        trimmed
+      );
     if (startsWithItemCode && !/^LOT\s+\d+\s*[—:-]/i.test(trimmed)) {
       return false;
     }
@@ -180,15 +246,16 @@ export class BpuMathEngine {
       .replace(/DOCUMENT\s+FICTIF[^\n]*?(?:CONTRACTUELLE|$)/gi, '\n')
       .replace(/AON\s+N[°o][^\n]*?Page\s+\d+(?:\s*\/\s*\d+)?/gi, '\n')
       .replace(/---\s*Page\s+\d+\s*---/gi, '\n')
-      .replace(/((?:19|9)\s*%)\s+(?=(?:LOT-|ITEM-|BPU-|MOD-)?\d{1,2}(?:\.\d{1,2})?\s+[A-Za-zÀ-ÿ])/gi, '$1\n')
+      .replace(/((?:19|9)\s*%)\s+(?=(?:(?:POSTE|LOT|ITEM|BPU|MOD)[\s:-]*)?\d{1,2}(?:\.\d{1,2})?\s+[A-Za-zÀ-ÿ])/gi, '$1\n')
+      .replace(/(\d+,\d{2})\s+(?=(?:POSTE[\s:-]*\d{1,2}|0[1-9]|[1-4]\d|\d{1,2}\.\d{1,2})\s+[A-Za-zÀ-ÿ])/gi, '$1\n')
       .replace(/\s+(?=(?:0[1-9]|[1-9]\d|\d{1,2}\.\d{1,2})\s*\|)/g, '\n')
-      .replace(/\s+(?=(?:LOT|BPU|ITEM|MOD)-\d{1,3}\b)/gi, '\n')
+      .replace(/\s+(?=(?:POSTE|LOT|BPU|ITEM|MOD)[\s-]*0?[1-9]\d?\b)/gi, '\n')
       .replace(/\s+(?=(?:MONTANT\s+)?(?:SOUS-)?TOTAL\s+(?:G[EÉÈ]N[EÉÈ]RAL|GLOBAL|HT|TTC|LOT))/gi, '\n')
       .replace(/\s+(?=TVA\s*\(?(?:19|9)\s*%)/gi, '\n');
   }
 
   /**
-   * Joins 2-line wrapped DQE/BPU items (e.g. "1.3 Appliance pare-feu...\n(fiche S3) U 6 7 250 000 42 500 000 19%")
+   * Joins multi-line wrapped DQE/BPU items (including 2-line wrapped designations and multi-line Poste 01..07 tables)
    * into single complete lines before row extraction.
    */
   private static mergeWrappedRows(rawLines: string[]): string[] {
@@ -199,24 +266,55 @@ export class BpuMathEngine {
           l.length > 0 &&
           !/^DOCUMENT\s+FICTIF/i.test(l) &&
           !/^AON\s+N[°o].*Page\s+\d+/i.test(l) &&
-          !/^---\s*Page\s+\d+/i.test(l)
+          !/^---\s*Page\s+\d+/i.test(l) &&
+          !/^(?:N[°o]|Poste|Code|Item)\s+(?:D[eé]signation|Libell[eé])/i.test(l)
       );
 
     const merged: string[] = [];
-    const itemStartRe = /^(?:LOT-|ITEM-|BPU-|MOD-)?(\d{1,2}(?:\.\d{1,2})?)(?:\s+|\|)/i;
+    const isItemStart = (s: string, allowBareCode: boolean): boolean => {
+      if (/^LOT\s+\d+\s*[—:-]/i.test(s)) return false;
+      if (/^(?:POSTE|LOT|ITEM|BPU|MOD)[\s:-]*0?[1-9]\d?(?:\.\d{1,2})?(?:\s+|\||:|-|$)/i.test(s)) {
+        return true;
+      }
+      if (/^\d{1,2}\.\d{1,2}(?:\s+|\||$)/.test(s)) return true;
+      if (/^(?:0[1-9]|[1-4]\d)(?:\s+[A-Za-zÀ-ÿ]|\s*\|)/.test(s)) return true;
+      if (allowBareCode && /^0[1-9]$/.test(s)) return true;
+      return false;
+    };
+
     const stopContinuationRe =
-      /^(?:(?:LOT-|ITEM-|BPU-|MOD-)?\d{1,2}(?:\.\d{1,2})?(?:\s+|\|)|Total\b|Montant\b|Sous-total\b|TVA\b|N[°o]\b|Item\b|Code\b|Annexe\b|LOT\s+\d+\s*[—:-]|Estimation\b|Planning\b|Récapitulatif\b|NB\s*:|Note\s*:)/i;
-    const hasCompletePriceTailRe = /(\d[\d\s.,]*\d)\s+(?:(19|9)\s*%\s*)?$/;
+      /^(?:Total\b|Montant\s+Total\b|Sous-total\b|TVA\b|N[°o]\s+D[eé]signation|Annexe\b|LOT\s+\d+\s*[—:-]|Estimation\b|Planning\b|R[eé]capitulatif\b|Arr[êe]t[eé]\s+le\s+pr[eé]sent|NB\s*:|Note\s*:|SECTION\s+\d|CHAPITRE\s+\d|ARTICLE\s+\d)/i;
+
+    // A row has a complete price tail only when it ends with at least two price tokens (e.g. PU and Total) + optional TVA%
+    const hasTwoPricesAtTail = (s: string): boolean => {
+      const stripped = s
+        .replace(/\s+(?:19|9)\s*%\s*$/, '')
+        .replace(/\s+(?:DA|DZD)\s*$/i, '')
+        .trim();
+      const tailMatch = stripped.match(/(\d[\d\s.,]*)$/);
+      if (!tailMatch) return false;
+      const parsed = this.parseNumericTail(tailMatch[1], false);
+      return Boolean(parsed && parsed.pu >= 100 && parsed.claimed >= 100);
+    };
 
     let i = 0;
     while (i < cleaned.length) {
       let current = cleaned[i];
-      if (itemStartRe.test(current) && !/^LOT\s+\d+\s*[—:-]/i.test(current)) {
+      if (isItemStart(current, true)) {
+        let linesJoined = 0;
         while (
           i + 1 < cleaned.length &&
-          !hasCompletePriceTailRe.test(current) &&
-          !stopContinuationRe.test(cleaned[i + 1])
+          linesJoined < 7 &&
+          !hasTwoPricesAtTail(current) &&
+          !stopContinuationRe.test(cleaned[i + 1]) &&
+          !isItemStart(cleaned[i + 1], false)
         ) {
+          current = `${current} ${cleaned[i + 1]}`;
+          i++;
+          linesJoined++;
+        }
+        // If the immediately following line is just the trailing TVA percentage ("19%" or "9%"), attach it
+        if (i + 1 < cleaned.length && /^(?:19|9)\s*%$/.test(cleaned[i + 1])) {
           current = `${current} ${cleaned[i + 1]}`;
           i++;
         }
@@ -363,7 +461,7 @@ export class BpuMathEngine {
    * The Core Extraction & Audit Logic
    */
   static auditBpu(rawText: string, declaredTotalHT: number = 0, presetItems?: any[]): BpuAuditResult {
-    const safeText = rawText || '';
+    const safeText = this.normalizePdfText(rawText || '');
     const rawSlice = this.extractPricingSlice(safeText, true);
     const effectiveDeclaredHT =
       declaredTotalHT > 0
@@ -380,16 +478,18 @@ export class BpuMathEngine {
         const line = rawLine.trim();
         if (this.isExcludedLine(line)) continue;
 
-        // Strategy A: Pipe-delimited rows (including decimal codes & blank qty like "05 | Main d'oeuvre | | 7.000.000 | 7,000,000")
+        // Strategy A: Pipe-delimited rows (including Poste 01..07, decimal codes & blank qty)
         if (line.includes('|')) {
           const rawCells = line.split('|').map((c) => c.trim());
           const nonEmpty = rawCells.filter((c) => c.length > 0);
           if (nonEmpty.length >= 3) {
-            if (/^(item|n°|no|code|lot|r[eé]f)/i.test(nonEmpty[0]) && /d[eé]signation/i.test(line)) {
+            if (/^(item|n°|no|code|lot|poste|r[eé]f)/i.test(nonEmpty[0]) && /d[eé]signation/i.test(line)) {
               continue;
             }
 
-            const codeMatch = nonEmpty[0].match(/^(?:LOT-|ITEM-|BPU-|MOD-)?(\d{1,3}(?:\.\d{1,2})?)$/i);
+            const codeMatch = nonEmpty[0].match(
+              /^(?:POSTE[\s:-]*|LOT-|ITEM-|BPU-|MOD-)?(\d{1,3}(?:\.\d{1,2})?)$/i
+            );
             if (codeMatch) {
               const rawCode = codeMatch[1];
               const code = rawCode.includes('.')
@@ -399,7 +499,14 @@ export class BpuMathEngine {
               const numericTail = nonEmpty
                 .slice(2)
                 .filter((c) => !/^(?:19|9)\s*%$/.test(c))
-                .map((c) => this.cleanNum(c))
+                .map((c) =>
+                  this.cleanNum(
+                    c.replace(
+                      /(?:Qt[eé]|Quantit[eé]|P\.?U\.?(?:\s*H\.?T\.?)?|Montant(?:\s*H\.?T\.?)?|Total(?:\s*H\.?T\.?)?)\s*:?/gi,
+                      ''
+                    )
+                  )
+                )
                 .filter((n) => n > 0 && n !== 2026);
 
               if (numericTail.length >= 2) {
@@ -443,8 +550,16 @@ export class BpuMathEngine {
           }
         }
 
-        // Strategy B: Space/tab-separated DQE & BPU rows (supports decimal codes "1.1".."2.5", space-separated thousands, and missing qty)
-        let workingLine = line;
+        // Strategy B: Space/tab-separated DQE & BPU rows (supports "Poste 01..07", decimal codes "1.1".."2.5", space-separated thousands, and missing qty)
+        let workingLine = line
+          .replace(
+            /\b(?:Qt[eé]|Quantit[eé]|P\.?U\.?(?:\s*H\.?T\.?)?|Prix\s+Unitaire|Montant(?:\s*H\.?T\.?)?|Total(?:\s*H\.?T\.?)?)\s*:\s*/gi,
+            ' '
+          )
+          .replace(/\s+(?:DA|DZD)(?=\s+\d|\s*$)/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
         let tvaRate = 0.19;
         const tvaMatch = workingLine.match(/\s+(19|9)\s*%\s*$/);
         if (tvaMatch) {
@@ -454,7 +569,7 @@ export class BpuMathEngine {
         workingLine = workingLine.replace(/\s+(?:DA|DZD)\s*$/i, '').trim();
 
         const codeHeadMatch = workingLine.match(
-          /^(?:LOT-|ITEM-|BPU-|MOD-)?(\d{1,2}(?:\.\d{1,2})?)\s+(.+)$/i
+          /^(?:POSTE[\s:-]*|LOT-|ITEM-|BPU-|MOD-)?(\d{1,2}(?:\.\d{1,2})?)[\s:-]+(.+)$/i
         );
         if (codeHeadMatch) {
           const rawCode = codeHeadMatch[1];
