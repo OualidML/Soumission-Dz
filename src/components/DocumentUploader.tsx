@@ -85,10 +85,12 @@ export function DocumentUploader({
           const pageStr = (textContent.items || [])
             .map((item: any) => {
               if (!item || typeof item.str !== 'string') return '';
-              return item.str.replace(/\u0000/g, '');
+              const clean = item.str.replace(/\u0000/g, '');
+              return item.hasEOL ? `${clean}\n` : `${clean} `;
             })
-            .filter(Boolean)
-            .join(' ');
+            .join('')
+            .replace(/[ \t]+\n/g, '\n')
+            .trim();
           pageTexts.push(`--- Page ${i} ---\n${pageStr}`);
         }
 

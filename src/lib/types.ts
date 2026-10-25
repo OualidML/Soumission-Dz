@@ -1,5 +1,11 @@
+/**
+ * SOUMISSIONAI-DZ: CORE TYPE DEFINITIONS
+ * Synchronized with the Deterministic Audit Engine and BPU Math Engine.
+ */
+
 export type EnvelopeKey = 'ENVELOPE_A' | 'ENVELOPE_B' | 'ENVELOPE_C';
 
+// --- BPU & FINANCIAL TYPES ---
 export interface BpuItem {
   code: string;
   designation: string;
@@ -10,52 +16,84 @@ export interface BpuItem {
   tvaRate: number; // 19 or 9
 }
 
-export interface BpuAuditLine {
+export interface BpuRow {
   code: string;
   designation: string;
-  unit: string;
   qty: number;
   unitPriceHT: number;
   claimedTotalHT: number;
   computedTotalHT: number;
-  discrepancyHT: number;
-  hasDiscrepancy: boolean;
   tvaRate: number;
-  computedTVA: number;
-  computedTTC: number;
-  notes?: string;
+  diff: number;
+  isError: boolean;
+  isValid?: boolean;
+  missingQty?: boolean;
+  // Backward/cross-module aliases
+  itemNumber?: string;
+  quantity?: number;
+  unitPrice?: number;
+  declaredTotal?: number;
+  calculatedTotal?: number;
 }
 
-export interface BpuAuditSummary {
-  lines: BpuAuditLine[];
-  claimedGrandTotalHT: number;
-  computedGrandTotalHT: number;
-  grandDiscrepancyHT: number;
-  totalTva9HT: number;
-  totalTva9Amount: number;
-  totalTva19HT: number;
-  totalTva19Amount: number;
+export interface BpuAuditResult {
+  rows: BpuRow[];
+  totalHTDeclared: number;
+  totalHTComputed: number;
   totalTVA: number;
-  grandTotalTTC: number;
-  hasErrors: boolean;
-  criticalErrorsCount: number;
-  errorDescriptions: string[];
-  status?: 'AUDITED' | 'BPU_DATA_NOT_FOUND' | 'UNVERIFIED' | 'ARITHMETIC_ERROR';
-  declaredGrandTotalHT?: number | null;
-  notFoundMessage?: string;
-  unverifiedMessage?: string;
+  totalTTC: number;
+  status: 'AUDITED' | 'ARITHMETIC_ERROR' | 'DISCREPANCY_DETECTED' | 'BPU_DATA_NOT_FOUND' | 'UNVERIFIED';
+  globalDiff: number;
+  // Backward/cross-module aliases
+  items?: BpuRow[];
+  declaredTotalHT?: number;
+  calculatedTotalHT?: number;
+  tvaRate?: number;
+  tvaAmount?: number;
 }
 
+// --- LEGAL & AUDIT TYPES ---
+export interface AuditFinding {
+  id: string;
+  level: 'FATAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  message: string;
+  legalBasis: string;
+  correctiveAction: string;
+  category: 'FINANCIAL' | 'LEGAL' | 'TECHNICAL' | 'ADMINISTRATIVE';
+  // Backward/cross-module aliases
+  trapId?: string;
+  severity?: 'FATAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  cause?: string;
+  correctionRequired?: string;
+}
+
+export interface AuditResult {
+  isQualified: boolean;
+  eliminationRisk: number; // 0 - 100
+  findings: AuditFinding[];
+  verdict: 'QUALIFIED' | 'CRITICAL_DISQUALIFICATION_WARNING' | 'REJECTED';
+  // Backward/cross-module aliases
+  overallStatus?: 'QUALIFIED' | 'CRITICAL_DISQUALIFICATION_WARNING' | 'REJECTED';
+  complianceScore?: number;
+  eliminationRiskPercent?: number;
+  fatalTraps?: AuditFinding[];
+}
+
+// --- PROFILE & TENDER TYPES ---
 export interface CompanyProfile {
   id: string;
   name: string;
+  companyName?: string;
   type: string;
+  legalForm?: string;
   wilaya: string;
   rc: string;
   nif: string;
   nis: string;
   yearsActive: number;
   avgAnnualTurnoverDZD: number;
+  annualTurnover?: number;
+  category?: string;
   certifications: string[];
   cnasCasnosUpdated: boolean;
   extraitDeRoleStatus: string;
@@ -63,6 +101,8 @@ export interface CompanyProfile {
   startupLabel?: string | null;
   engineersCount: number;
   keyEquipment: string[];
+  proposedDeadlineDays?: number;
+  proposedDeadline?: number;
 }
 
 export interface TenderData {
@@ -85,78 +125,16 @@ export interface EnvelopeCheckItem {
   details: string;
 }
 
-export interface EnvelopeData {
-  envelopeKey: EnvelopeKey;
-  title: string;
-  subtitle: string;
-  legalBasis: string;
-  items: EnvelopeCheckItem[];
-  complianceScore: number; // 0 - 100
-}
-
-export interface Pass1Result {
-  tenderReference: string;
-  tenderTitle: string;
-  contractingAuthority: string;
-  envelopes: {
-    envelopeA: EnvelopeData;
-    envelopeB: EnvelopeData;
-    envelopeC: EnvelopeData;
-  };
-  technicalRubric: {
-    minEliminatoryScore: string;
-    totalPossibleScore: string;
-    criteriaSummary: string[];
-  };
-  memoireTechnique: {
-    title: string;
-    introduction: string;
-    companyPresentation: string;
-    humanResourcesMethodology: string;
-    materialAndTechnicalExecution: string;
-    timelineAndQualityCommitment: string;
-    conclusion: string;
-    fullMarkdown: string;
-  };
-  extractedBpuItems?: BpuItem[];
-  eliminatoryClauses?: string[];
-}
-
-export interface FatalTrap {
-  trapId: string;
-  severity: 'FATAL' | 'HIGH' | 'MEDIUM';
-  cause: string;
-  legalBasis: string;
-  correctionRequired: string;
-}
-
-export interface Pass2Critic {
-  status: 'SAFE' | 'WARNING' | 'CRITICAL_DISQUALIFICATION_WARNING';
-  isDisqualifiedWarning: boolean;
-  eliminationRiskPercent: number; // 0 - 100
-  safetyThreshold: number; // 15%
-  fatalTrapsIdentified: FatalTrap[];
-  criticalTrapsFound: FatalTrap[];
-  regulatoryExemptionsApplied: {
-    exemptionTitle: string;
-    legalBasis: string;
-    impact: string;
-  }[];
-  copeoPresidentVerdict: string;
-  readyToSubmit: boolean;
-}
-
+// --- FINAL API RESPONSE (The Master Contract) ---
 export interface AnalysisResponse {
-  pass1Result: Pass1Result;
-  pass2Critic: Pass2Critic;
-  bpuAudit: BpuAuditSummary;
+  metadata: {
+    title: string;
+    reference: string;
+    authority: string;
+  };
+  legalAudit: AuditResult;
+  bpuAudit: BpuAuditResult;
+  finalReport: string;
   thoughtTrace: string;
-  activeSkillsUsed: {
-    name: string;
-    version: string;
-    description: string;
-  }[];
   modelUsed: string;
-  executionMode: 'GOOGLE_AI_STUDIO' | 'OPENROUTER_FALLBACK' | 'LOCAL_DETERMINISTIC_FALLBACK';
-  timestamp: string;
 }

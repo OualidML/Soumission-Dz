@@ -1,533 +1,427 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { loadSkillBySlug } from '@/lib/skill-loader';
-import { auditBpuItems } from '@/lib/bpu-math';
-import { callGemma4, parseSafeJson } from '@/lib/gemma-client';
-import { runDeterministicLocalAnalysis } from '@/lib/local-fallback-analyzer';
-import { extractBpuHeuristic, isExcludedBpuLine, isYearOrReferenceAmount, isValidBpuDesignation } from '@/lib/bpu-heuristic';
-import { extractRequiredTurnover, extractRequiredCerts, classifyStartupClauses } from '@/lib/requirement-checks';
-import { TenderData, CompanyProfile, AnalysisResponse, FatalTrap, BpuItem } from '@/lib/types';
-
-// Vercel Serverless Function Execution Config (Timeout Protection)
-export const maxDuration = 60;
-export const dynamic = 'force-dynamic';
+import { NextResponse } from 'next/server';
+import { gemmaClient } from '@/lib/gemma-client';
+import { BpuMathEngine, BpuAuditResult, formatDZD } from '@/lib/bpu-math';
+import { AuditEngine, ExtractedTenderData } from '@/lib/audit-engine';
+import { AuditResult } from '@/lib/types';
+import { skillLoader } from '@/lib/skill-loader';
 
 /**
- * Smart French/Algerian number parser.
- * Handles: "4,500,000" → 4500000, "3.000.000" → 3000000, "4 500 000" → 4500000
- * Rule: if dot/comma is followed by exactly 3 digits and then another separator or end, it is a thousands separator.
+ * Deterministic French Markdown Mémoire Technique Justificatif generator (<1ms).
+ * Used when offline/rate-limited or as a fallback so raw JSON is never rendered in the UI.
  */
-function parseAlgerianNumber(raw: string): number {
-  if (!raw) return 0;
-  const s = raw.trim().replace(/\s/g, '');
-  if (!s) return 0;
+function buildDeterministicMemoire(
+  extractedData: any,
+  companyProfile: any,
+  auditInput: ExtractedTenderData,
+  legalAudit: AuditResult,
+  bpuAudit: BpuAuditResult
+): string {
+  const bidderName = companyProfile?.name || companyProfile?.companyName || 'Entreprise Soumissionnaire';
+  const bidderType = companyProfile?.type || 'SARL';
+  const findingsMd =
+    legalAudit.findings.length === 0
+      ? '- **Aucune anomalie éliminatoire détectée.** Le dossier de candidature et l’offre technique respectent les prescriptions de la Loi n° 23-12.'
+      : legalAudit.findings
+          .map(
+            (f) =>
+              `- **[${f.level}] ${f.id}** — ${f.message}\n  - *Référence légale :* ${f.legalBasis}\n  - *Action corrective requise :* ${f.correctiveAction}`
+          )
+          .join('\n');
 
-  // Count separators: if there are multiple dots or commas before end, they're thousands seps
-  const dotCount = (s.match(/\./g) || []).length;
-  const commaCount = (s.match(/,/g) || []).length;
+  const bpuRowsMd =
+    bpuAudit.rows && bpuAudit.rows.length > 0
+      ? [
+          '| Code | Désignation | Qté | P.U HT | Total Déclaré HT | Total Recalculé HT | Statut |',
+          '| :--- | :--- | :---: | ---: | ---: | ---: | :---: |',
+          ...bpuAudit.rows.map(
+            (r) =>
+              `| ${r.code} | ${r.designation} | ${r.qty} | ${formatDZD(r.unitPriceHT)} | ${formatDZD(r.claimedTotalHT)} | ${formatDZD(r.computedTotalHT)} | ${r.isError ? 'ERREUR' : 'CONFORME'} |`
+          ),
+        ].join('\n')
+      : '_Aucun tableau BPU détaillé détecté dans le texte extrait._';
 
-  // Pattern: "4.500.000" or "3.000.000" (dots as thousands)
-  if (dotCount >= 2 && commaCount === 0) {
-    return parseFloat(s.replace(/\./g, '')) || 0;
-  }
-  // Pattern: "4,500,000" (commas as thousands)
-  if (commaCount >= 2 && dotCount === 0) {
-    return parseFloat(s.replace(/,/g, '')) || 0;
-  }
-  // Pattern: "4.500,00" (dot=thousands, comma=decimal — French format)
-  if (dotCount === 1 && commaCount === 1 && s.indexOf('.') < s.indexOf(',')) {
-    return parseFloat(s.replace('.', '').replace(',', '.')) || 0;
-  }
-  // Pattern: "4,500.00" (comma=thousands, dot=decimal — English format)
-  if (commaCount === 1 && dotCount === 1 && s.indexOf(',') < s.indexOf('.')) {
-    return parseFloat(s.replace(',', '')) || 0;
-  }
-  // Pattern: "4500000" or "4,500" (single comma = thousands or decimal — ambiguous; treat as thousands if >3 digits after)
-  if (commaCount === 1 && dotCount === 0) {
-    const afterComma = s.split(',')[1] || '';
-    if (afterComma.length === 3) return parseFloat(s.replace(',', '')) || 0;
-    return parseFloat(s.replace(',', '.')) || 0;
-  }
-  if (dotCount === 1 && commaCount === 0) {
-    const afterDot = s.split('.')[1] || '';
-    if (afterDot.length === 3) return parseFloat(s.replace('.', '')) || 0;
-    return parseFloat(s) || 0;
-  }
-  return parseFloat(s.replace(/[^0-9.]/g, '')) || 0;
+  return [
+    `# MÉMOIRE TECHNIQUE JUSTIFICATIF`,
+    `**Objet du Marché :** ${extractedData.tenderTitle || 'Cahier des Charges'}`,
+    `**Référence :** ${extractedData.tenderReference || 'N/A'}`,
+    `**Autorité Contractante :** ${extractedData.issuingAuthority || 'Commission des Marchés Publics'}`,
+    `**Soumissionnaire :** ${bidderName} (${bidderType})`,
+    '',
+    `## 1. Synthèse de Conformité (Loi n° 23-12)`,
+    `- **Verdict de la Commission COPEO :** **${legalAudit.verdict}**`,
+    `- **Risque d'Élimination :** **${legalAudit.eliminationRisk}%**`,
+    `- **Capacité Financière :** CA Minimal Requis : ${auditInput.requiredTurnover ? formatDZD(auditInput.requiredTurnover) : 'Non spécifié'} | CA Soumissionnaire : ${auditInput.actualTurnover ? formatDZD(auditInput.actualTurnover) : 'Non renseigné'}${auditInput.isStartup ? ' *(Dispensé de bilans — Art. 87 Loi 23-12)*' : ''}`,
+    `- **Classification Professionnelle :** Catégorie Requise : ${auditInput.requiredCategory || 'Non spécifiée'} | Catégorie Détenue : ${auditInput.actualCategory || 'Non renseignée'}`,
+    `- **Délai d'Exécution :** Plafond CPS : ${auditInput.maxDeadlineDays ?? 'Non spécifié'} jours | Délai Proposé : ${auditInput.proposedDeadlineDays ?? 'Conforme'} jours`,
+    '',
+    `## 2. Diagnostic Juridique & Clauses Éliminatoires (Art. 47 & Art. 87)`,
+    findingsMd,
+    '',
+    `## 3. Audit Arithmétique du BPU / DQE`,
+    `- **Statut Arithmétique :** **${bpuAudit.status}**`,
+    `- **Total Général HT Déclaré :** ${formatDZD(bpuAudit.totalHTDeclared)}`,
+    `- **Total Général HT Recalculé :** ${formatDZD(bpuAudit.totalHTComputed)} (Écart : ${formatDZD(bpuAudit.globalDiff)})`,
+    `- **Total TVA :** ${formatDZD(bpuAudit.totalTVA)} | **Total Général TTC :** ${formatDZD(bpuAudit.totalTTC)}`,
+    '',
+    bpuRowsMd,
+  ].join('\n');
 }
 
-/** Returns true if line looks like a legal citation rather than a BPU row */
-function isLegalCitationLine(line: string): boolean {
-  const l = line.toLowerCase();
-  return (
-    /\bart\.\s*\d/.test(l) ||
-    /\bloi\s+\d{2,4}[-\/]\d{2,4}/.test(l) ||
-    /\barticle\s+\d{2,3}\b/.test(l) ||
-    /\bn[°o]\s*\d{2,4}\/\d{4}/.test(l) ||
-    /\balinéa\b/.test(l) ||
-    /\binstruction\b/.test(l) ||
-    l.includes('décret') ||
-    l.includes('arrêté') ||
-    l.includes('journal officiel')
+/**
+ * Deterministic <2ms regex baseline extractor for Algerian Tenders (Loi n° 23-12).
+ * Handles both multi-line text and pdf.js single-line flattened pages.
+ */
+function extractDeterministicBaseline(rawText: string, tenderData?: any) {
+  const text = rawText || '';
+
+  // 1. Tender Title (multi-line "Objet : ...", stopping cleanly before metadata/section headers)
+  const objetMatch = text.match(
+    /Objet\s*(?:du\s+march[eéè])?\s*:\s*([\s\S]{5,350}?)(?=\r?\n\s*(?:Lot\b|Financement\b|Cadre\s+l[eéè]gal\b|R[eéè]f[eéè]rence\b|Ma[îi]tre\s+d['’]ouvrage\b|\d+\.\s+[A-ZÉÈÀ]|PARTIE\s+[I1V]|Article\s+\d)|\s+\d+\.\s+[A-ZÉÈÀ]|\s+SECTION\s+\d|\s+CONFORM[EÉÈ]MENT|\s+Article\s+\d)/i
   );
-}
+  const tenderTitle =
+    objetMatch?.[1]?.replace(/\s+/g, ' ').trim() ||
+    (tenderData?.title && !tenderData.title.startsWith('Cahier des Charges —') ? tenderData.title : null) ||
+    'Marché Public (Loi n° 23-12)';
 
-/**
- * Smart BPU extractor — isolates the BPU section first, then parses rows.
- * Supports pipe-delimited tables and multi-column rows. Never matches legal article numbers.
- */
-function extractBpuStructured(text: string): BpuItem[] | null {
-  if (!text) return null;
+  // 2. Tender Reference (from "N° ...")
+  const refMatch = text.match(
+    /(?:AON|AO|CONSULTATION|BAOSEM|APPEL\s+D['’]OFFRES[^N°]{0,30})?\s*N[°o]\s*([A-Z0-9][A-Z0-9\/.-]{3,35})/i
+  );
+  const tenderReference =
+    refMatch?.[1]?.trim() ||
+    (tenderData?.reference && !tenderData.reference.startsWith('DOC-') ? tenderData.reference : null) ||
+    'REF-N/A';
 
-  // Step 1: Isolate the BPU section
-  const bpuHeaderRegex = /(?:BORDEREAU\s+DES\s+PRIX(?:\s+UNITAIRES)?|B\.?P\.?U\.?|PRIX\s+UNITAIRES|DÉTAIL\s+(?:QUANTITATIF|ESTIMATIF))/i;
-  const allLines = text.split(/\r?\n/);
-  let bpuStartLine = -1;
-  for (let i = 0; i < allLines.length; i++) {
-    if (bpuHeaderRegex.test(allLines[i])) {
-      bpuStartLine = i;
-      break;
+  // 3. Issuing Authority (explicit "Maître d'ouvrage :" first, then clean header lines)
+  let issuingAuthority =
+    tenderData?.authority &&
+    tenderData.authority !== 'Commission des Marchés Publics' &&
+    tenderData.authority !== "Maître d'Ouvrage"
+      ? tenderData.authority
+      : null;
+
+  if (!issuingAuthority) {
+    const moMatch = text.match(/Ma[îi]tre\s+d['’]ouvrage\s*[:|]?\s*([^\r\n]+)/i);
+    if (
+      moMatch &&
+      moMatch[1].trim().length > 3 &&
+      !/^(?:le\s+client|l['’]autorit[eé]\s+contractante)$/i.test(moMatch[1].trim())
+    ) {
+      issuingAuthority = moMatch[1].trim();
     }
   }
 
-  // Use only BPU section lines if found; otherwise scan full text (may find nothing)
-  const scanLines = bpuStartLine >= 0 ? allLines.slice(bpuStartLine) : allLines;
+  if (!issuingAuthority) {
+    const headerCutoff = text.search(/AVIS\s+D['’]APPEL\s+D['’]OFFRES|CAHIER\s+DES\s+CHARGES/i);
+    const headerSlice = (headerCutoff > 0 ? text.slice(0, headerCutoff) : text.slice(0, 600))
+      .replace(/---\s*Page\s+\d+\s*---/gi, '\n')
+      .replace(/DOCUMENT\s+FICTIF[^\n]*/gi, '\n')
+      .replace(/R[EÉÈ]PUBLIQUE\s+ALG[EÉÈ]RIENNE\s+D[EÉÈ]MOCRATIQUE\s+ET\s+POPULAIRE/gi, '\n');
 
-  const items: BpuItem[] = [];
-  let index = 1;
+    const headerLines = headerSlice
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(
+        (l) =>
+          l.length > 4 &&
+          l.length < 140 &&
+          !/^---/.test(l) &&
+          !/AON\s+N[°o]|Dossier\s+d['’]appel\s+d['’]offres|Page\s+\d+|DOCUMENT\s+FICTIF|AUCUNE\s+VALEUR/i.test(l)
+      );
 
-  for (const rawLine of scanLines) {
-    const line = rawLine.trim();
-    if (!line || line.length < 5) continue;
-    // 1. The "Footer/Header" Guard: instantly discard footers, headers, references, statutes
-    if (isLegalCitationLine(line) || isExcludedBpuLine(line)) continue;
-
-    // Strategy A: Pipe-delimited table row: "01 | Designation | 1 | 4,500,000 | 4,500,000"
-    if (line.includes('|')) {
-      const parts = line.split('|').map((p) => p.trim()).filter(Boolean);
-      if (parts.length >= 4) {
-        const maybeCode = parts[0];
-        const maybeDesig = parts[1];
-        // 2. The "Structure" Guard: must have a real textual designation
-        if (!isValidBpuDesignation(maybeDesig)) continue;
-
-        // 3. The "Amount" Guard: ignore bare years (2026) and noise
-        const numericParts = parts
-          .slice(2)
-          .map((p) => parseAlgerianNumber(p))
-          .filter((n) => n > 0 && !isYearOrReferenceAmount(n));
-
-        if (numericParts.length >= 2) {
-          const qty = numericParts[0] <= 10000 ? numericParts[0] : 1;
-          const unitPriceHT = numericParts[1] >= 100 ? numericParts[1] : numericParts[numericParts.length - 1];
-          const claimedTotalHT = numericParts.length >= 3 ? numericParts[2] : qty * unitPriceHT;
-
-          if (
-            unitPriceHT >= 100 &&
-            !isYearOrReferenceAmount(unitPriceHT) &&
-            !isYearOrReferenceAmount(claimedTotalHT)
-          ) {
-            items.push({
-              code: /^\d+$/.test(maybeCode)
-                ? `BPU-${maybeCode.padStart(2, '0')}`
-                : maybeCode || `BPU-${String(index).padStart(2, '0')}`,
-              designation: maybeDesig.slice(0, 80),
-              unit: parts.find((p) => /^(U|FF|ML|M²|M³|KG|T|J|H|ENS|FT)$/i.test(p)) || 'U',
-              qty,
-              unitPriceHT,
-              claimedTotalHT,
-              tvaRate: line.includes('9%') ? 9 : 19,
-            });
-            index++;
-            continue;
-          }
-        }
-      }
-    }
-
-    // Strategy B: Numeric-rich line without pipe (tab or space separated)
-    const numberTokens = line.match(/\d[\d\s,.]*\d|\d+/g) || [];
-    const parsedNums = numberTokens
-      .map(parseAlgerianNumber)
-      .filter((n) => n >= 100 && !isYearOrReferenceAmount(n));
-
-    if (parsedNums.length >= 2) {
-      const firstNumIdx = line.search(/\d[\d\s,.]*\d|\d+/);
-      const designation = line
-        .slice(0, firstNumIdx)
-        .replace(/^[\d.\-|]+\s*/, '')
-        .trim()
-        .slice(0, 80);
-
-      // 2. The "Structure" Guard: must be a genuine service/item designation
-      if (!isValidBpuDesignation(designation)) continue;
-
-      const qty = parsedNums[0] <= 10000 ? parsedNums[0] : 1;
-      const unitPriceHT = parsedNums.length >= 2 ? parsedNums[1] : parsedNums[0];
-      const claimedTotalHT = parsedNums.length >= 3 ? parsedNums[parsedNums.length - 1] : qty * unitPriceHT;
-
-      if (
-        unitPriceHT >= 100 &&
-        !isYearOrReferenceAmount(unitPriceHT) &&
-        !isYearOrReferenceAmount(claimedTotalHT)
-      ) {
-        items.push({
-          code: `BPU-${String(index).padStart(2, '0')}`,
-          designation,
-          unit: 'U',
-          qty,
-          unitPriceHT,
-          claimedTotalHT,
-          tvaRate: line.includes('9%') ? 9 : 19,
-        });
-        index++;
-      }
+    if (headerLines.length > 0) {
+      issuingAuthority = headerLines.slice(0, 2).join(' — ');
     }
   }
 
-  return items.length > 0 ? items : null;
+  // 4. Required Certifications (ISO 9001, ISO 14001, ISO 27001, ISO 45001, CISSP, CEH, MAF)
+  const certs = new Set<string>();
+  const isoRe = /\bISO(?:\s*\/\s*IEC)?\s*[-:]?\s*(\d{4,5})(?::\d{4})?\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = isoRe.exec(text)) !== null) {
+    certs.add(`ISO ${m[1]}`);
+  }
+  if (/\bCISSP\b/i.test(text)) certs.add('CISSP');
+  if (/\bCEH\b|Certified\s+Ethical\s+Hacker/i.test(text)) certs.add('CEH');
+  if (/\bMAF\b|agr[eéè]ment\s+(?:de\s+)?mat[eéè]riel/i.test(text)) certs.add('MAF');
+
+  // 5. Required Professional Category (e.g. "Catégorie III", "Catégorie IV")
+  const catMatch = text.match(/cat[eéè]gorie\s*(?:professionnelle\s*)?(?::\s*)?(V|IV|III|II|I)\b/i);
+  const requiredCategory = catMatch ? catMatch[1].toUpperCase() : null;
+
+  // 6. Required Turnover (e.g., "200 Millions DA", ">= 80 000 000 DA", "150 Millions DA")
+  let requiredTurnover: number | null = null;
+  const caRe =
+    /(?:chiffre\s+d['’]affaires|\bC\.?A\.?\b)[^.\n]{0,140}?(\d[\d\s.,]*\d|\d+)\s*(milliards?|mds?|millions?|m\s*da\b|mda\b|da\b|dzd\b)/gi;
+  let caMatch: RegExpExecArray | null;
+  while ((caMatch = caRe.exec(text)) !== null) {
+    const rawAmt = BpuMathEngine.cleanNum(caMatch[1]);
+    const unit = caMatch[2].toLowerCase();
+    let val = rawAmt;
+    if (/milliard|mds/.test(unit)) val = rawAmt * 1_000_000_000;
+    else if (/million|mda|m\s*da/.test(unit)) val = rawAmt * 1_000_000;
+    if (val >= 100_000 && (requiredTurnover === null || val > requiredTurnover)) {
+      requiredTurnover = val;
+    }
+  }
+
+  // 7. Max Deadline Days
+  let maxDeadlineDays: number | null = null;
+  const deadlineMatch = text.match(
+    /d[eéè]lai\s+(?:d['’]ex[eéè]cution|de\s+livraison|global|maximal)[^.\n]{0,60}?(\d{1,4})\s*(jours?|mois)/i
+  );
+  if (deadlineMatch) {
+    const num = parseInt(deadlineMatch[1], 10);
+    maxDeadlineDays = /mois/i.test(deadlineMatch[2]) ? num * 30 : num;
+  }
+
+  // 8. Declared Total HT
+  const declaredTotalHT = BpuMathEngine.extractDeclaredTotalHT(text);
+
+  return {
+    tenderTitle,
+    tenderReference,
+    issuingAuthority: issuingAuthority || 'Commission des Marchés Publics',
+    requiredTurnover,
+    requiredCategory,
+    requiredCertifications: Array.from(certs),
+    maxDeadlineDays,
+    declaredTotalHT,
+    envelopeBText: '',
+  };
 }
 
-/**
- * Two-stage BPU extraction. BPU_DATA_NOT_FOUND only if BOTH stages fail.
- */
-function extractBpuItemsFromRawText(text: string): BpuItem[] | null {
-  return extractBpuStructured(text) || extractBpuHeuristic(text);
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const tenderData: TenderData = body.tenderData;
-    const companyProfile: CompanyProfile = body.companyProfile;
-    const rawTenderText: string = body.rawTenderText || tenderData?.RawText || '';
-    const isCustomUpload: boolean = Boolean(
-      body.isCustomUpload ||
-      tenderData?.id === 'custom-tender' ||
-      tenderData?.id === 'custom' ||
-      tenderData?.id?.startsWith('DOC-') ||
-      tenderData?.id?.startsWith('custom')
+    const { companyProfile, tenderData } = body;
+    const rawTenderText =
+      body.rawTenderText ||
+      body.rawText ||
+      body.tenderData?.RawText ||
+      body.tenderData?.rawText ||
+      '';
+
+    if (!rawTenderText && (!tenderData?.bpuItems || tenderData.bpuItems.length === 0)) {
+      return NextResponse.json({ error: 'No tender text provided' }, { status: 400 });
+    }
+
+    // Deterministic <2ms baseline extraction
+    const baseline = extractDeterministicBaseline(rawTenderText, tenderData);
+
+    // --- PHASE 1: DATA EXTRACTION (The AI as a Clerk) ---
+    const extractionPrompt = `
+      You are a professional data extractor for Algerian Public Procurement (Loi 23-12).
+      Extract data from the text below into a STRICT JSON object.
+      
+      TEXT TO ANALYZE:
+      "${rawTenderText}"
+
+      REQUIRED JSON STRUCTURE:
+      {
+        "tenderTitle": "string or null",
+        "tenderReference": "string or null",
+        "issuingAuthority": "string or null",
+        "requiredTurnover": number or null,
+        "requiredCategory": "string or null",
+        "requiredCertifications": ["string", "string"],
+        "maxDeadlineDays": number or null,
+        "declaredTotalHT": number or null,
+        "envelopeBText": "string"
+      }
+
+      STRICT RULES:
+      1. Return ONLY the JSON object. No markdown, no explanation.
+      2. If a value is not found, use null.
+    `;
+
+    const aiResponse = await gemmaClient.generate(extractionPrompt);
+    const parsed = gemmaClient.parseSafeJson(aiResponse.finalText);
+
+    const isPlaceholderTitle = (t: any) =>
+      !t ||
+      typeof t !== 'string' ||
+      t.includes('Local Fallback') ||
+      t.includes('Extraction Failed') ||
+      t.startsWith('Cahier des Charges —');
+
+    // Union AI certifications + deterministic regex certifications (Zero Skimming)
+    const mergedCerts = Array.from(
+      new Set([
+        ...baseline.requiredCertifications,
+        ...(Array.isArray(parsed?.requiredCertifications) ? parsed.requiredCertifications : []),
+      ])
     );
 
-    if (!tenderData || !companyProfile) {
-      return NextResponse.json(
-        { error: 'Missing tenderData or companyProfile payload' },
-        { status: 400 }
-      );
-    }
+    const resolvedReference =
+      parsed?.tenderReference && parsed.tenderReference !== 'N/A'
+        ? parsed.tenderReference
+        : baseline.tenderReference;
+    const resolvedAuthority =
+      parsed?.issuingAuthority && parsed.issuingAuthority !== 'Unknown'
+        ? parsed.issuingAuthority
+        : baseline.issuingAuthority;
+    const resolvedMaxDeadlineDays =
+      typeof parsed?.maxDeadlineDays === 'number' && parsed.maxDeadlineDays > 0
+        ? parsed.maxDeadlineDays
+        : baseline.maxDeadlineDays;
 
-    // Step 0: Dynamically load the 3 modular skills from /skills
-    const extractorSkill = loadSkillBySlug('dz-law2312-extractor');
-    const auditorSkill = loadSkillBySlug('bpu-financial-auditor');
-    const criticSkill = loadSkillBySlug('commission-rejection-critic');
+    const extractedData = {
+      tenderTitle: !isPlaceholderTitle(parsed?.tenderTitle) ? parsed.tenderTitle : baseline.tenderTitle,
+      tenderReference: resolvedReference,
+      reference: resolvedReference,
+      issuingAuthority: resolvedAuthority,
+      authority: resolvedAuthority,
+      requiredTurnover:
+        typeof parsed?.requiredTurnover === 'number' && parsed.requiredTurnover > 0
+          ? parsed.requiredTurnover
+          : baseline.requiredTurnover,
+      requiredCategory: parsed?.requiredCategory || baseline.requiredCategory,
+      requiredCertifications: mergedCerts,
+      maxDeadlineDays: resolvedMaxDeadlineDays,
+      maxExecutionDays: resolvedMaxDeadlineDays,
+      envelopeBText: parsed?.envelopeBText || baseline.envelopeBText,
+      declaredTotalHT:
+        typeof parsed?.declaredTotalHT === 'number' && parsed.declaredTotalHT > 0
+          ? parsed.declaredTotalHT
+          : baseline.declaredTotalHT,
+    };
 
-    const activeSkillsUsed = [
-      {
-        name: extractorSkill.metadata.name || 'dz-law2312-extractor',
-        version: extractorSkill.metadata.version || '1.0.0',
-        description: extractorSkill.metadata.description || 'Loi 23-12 Requirement Extractor & Mémoire Drafter',
-      },
-      {
-        name: auditorSkill.metadata.name || 'bpu-financial-auditor',
-        version: auditorSkill.metadata.version || '1.0.0',
-        description: auditorSkill.metadata.description || 'BPU/DQE Financial & Arithmetic Auditor',
-      },
-      {
-        name: criticSkill.metadata.name || 'commission-rejection-critic',
-        version: criticSkill.metadata.version || '1.0.0',
-        description: criticSkill.metadata.description || 'COPEO Disqualification Critic with 15% Safety Boundary',
-      },
-    ];
+    // --- PHASE 2: DETERMINISTIC AUDIT (The TypeScript Judge) ---
+    const bpuAudit = BpuMathEngine.auditBpu(
+      rawTenderText,
+      Number(body.declaredTotalHT) || extractedData.declaredTotalHT || 0,
+      tenderData?.bpuItems
+    );
 
-    // Check for custom extracted BPU rows from uploaded PDF/custom text
-    // NEVER bleed demo BPU items into a custom document upload
-    // If PDF parser fails to extract the table, report 'BPU Data Not Found' rather than claiming Zero Errors
-    let activeBpuItems: BpuItem[] = [];
-
-    if (isCustomUpload) {
-      const customBpuItems = extractBpuItemsFromRawText(rawTenderText);
-      if (customBpuItems && customBpuItems.length > 0) {
-        activeBpuItems = customBpuItems;
-      } else {
-        // Do NOT invent mock tables. Keep activeBpuItems empty so bpu-math flags BPU Data Not Found
-        activeBpuItems = [];
+    const extractBidderCategory = (profile: any): string | null => {
+      if (typeof profile?.category === 'string' && profile.category.trim()) {
+        return profile.category.trim().toUpperCase();
       }
-    } else {
-      activeBpuItems =
-        tenderData.bpuItems && tenderData.bpuItems.length > 0
-          ? tenderData.bpuItems
-          : [];
-    }
+      const certs: string[] = Array.isArray(profile?.certifications) ? profile.certifications : [];
+      for (const cert of certs) {
+        const match = cert.match(/cat[eéè]gorie\s+(V|IV|III|II|I)\b/i);
+        if (match) return match[1].toUpperCase();
+      }
+      return null;
+    };
 
-    // Baseline deterministic legal analysis (Loi n° 23-12 single-source-of-truth)
-    const initialBpuAudit = auditBpuItems(activeBpuItems, tenderData.id, rawTenderText);
-    const localBaseline = runDeterministicLocalAnalysis(
-      { ...tenderData, RawText: rawTenderText, bpuItems: activeBpuItems },
+    const rawTurnover = companyProfile?.avgAnnualTurnoverDZD ?? companyProfile?.annualTurnover ?? null;
+    const actualTurnover =
+      typeof rawTurnover === 'number' && !Number.isNaN(rawTurnover) ? rawTurnover : null;
+
+    const rawProposedDeadline =
+      companyProfile?.proposedDeadlineDays ?? companyProfile?.proposedDeadline ?? null;
+    const proposedDeadlineDays =
+      typeof rawProposedDeadline === 'number' && !Number.isNaN(rawProposedDeadline)
+        ? rawProposedDeadline
+        : null;
+
+    const auditInput: ExtractedTenderData = {
+      requiredTurnover:
+        typeof extractedData.requiredTurnover === 'number' ? extractedData.requiredTurnover : null,
+      requiredCategory:
+        typeof extractedData.requiredCategory === 'string' ? extractedData.requiredCategory : null,
+      requiredCertifications: Array.isArray(extractedData.requiredCertifications)
+        ? extractedData.requiredCertifications
+        : [],
+      maxDeadlineDays:
+        typeof extractedData.maxDeadlineDays === 'number' ? extractedData.maxDeadlineDays : null,
+      actualTurnover,
+      actualCategory: extractBidderCategory(companyProfile),
+      heldCertifications: Array.isArray(companyProfile?.certifications)
+        ? companyProfile.certifications
+        : [],
+      proposedDeadlineDays,
+      envelopeBText: extractedData.envelopeBText || '',
+      isStartup: Boolean(companyProfile?.startupLabel),
+    };
+
+    const legalAudit = AuditEngine.performAudit(auditInput, bpuAudit);
+
+    // --- PHASE 3: REPORT GENERATION (Fast Failover & Deterministic Memoire) ---
+    const deterministicMemoire = buildDeterministicMemoire(
+      extractedData,
       companyProfile,
-      initialBpuAudit
+      auditInput,
+      legalAudit,
+      bpuAudit
     );
 
-    // =========================================================================
-    // STEP 1 — Agent Pass 1 (Extractor & Mémoire Drafter) via Gemma 4
-    // STRICT CONTEXT: Force model to use ONLY provided document text
-    // =========================================================================
-    const pass1Prompt = `
-You are executing SKILL: ${extractorSkill.metadata.name}
-Instructions:
-${extractorSkill.instructions}
+    let finalReportText = deterministicMemoire;
+    let finalThoughtTrace = aiResponse.thoughtTrace;
+    let finalModelUsed = aiResponse.modelUsed || 'local-deterministic-engine';
 
-CRITICAL STRICT CONTEXT RULE:
-You MUST base your analysis STRICTLY and EXCLUSIVELY on the actual document text provided below.
-DO NOT rely on cached or pre-baked scenarios (such as Sonelgaz or CHU unless explicitly written below).
-Analyze the actual clauses, requirements, and scope described in the text.
+    if (aiResponse.provider !== 'LOCAL_DETERMINISTIC_FALLBACK') {
+      const reportPrompt = `
+      You are the Senior Rapporteur for the COPEO Commission. 
+      Based on the following DETERMINISTIC AUDIT results, draft a formal French 'Mémoire Technique Justificatif'.
+      
+      TENDER DATA:
+      - Title: ${extractedData.tenderTitle}
+      - Reference: ${extractedData.tenderReference}
+      - Authority: ${extractedData.issuingAuthority}
+      
+      AUDIT VERDICT:
+      - Status: ${legalAudit.verdict}
+      - Risk Level: ${legalAudit.eliminationRisk}%
+      - Findings: ${JSON.stringify(legalAudit.findings)}
+      
+      BPU STATUS:
+      - Status: ${bpuAudit.status}
+      - Global Difference: ${bpuAudit.globalDiff} DA
+      
+      Tenderer Profile: ${companyProfile?.name || 'Soumissionnaire'}
+      
+      INSTRUCTIONS:
+      1. Use formal administrative French.
+      2. If the status is REJECTED, be firm and cite the Loi 23-12.
+      3. If QUALIFIED, emphasize the strengths.
+      4. Structure the report into: Presentation, Understanding of Needs, Methodology, and Conclusion.
+    `;
 
-Tender Title: ${tenderData.title}
-Tender Reference: ${tenderData.reference}
-Contracting Authority: ${tenderData.authority}
-Sector: ${tenderData.sector}
-
-ACTUAL DOCUMENT TEXT (From uploaded PDF/Document):
---- BEGIN DOCUMENT TEXT ---
-${rawTenderText.slice(0, 15000)}
---- END DOCUMENT TEXT ---
-
-Bidder Company Profile:
-${JSON.stringify(companyProfile, null, 2)}
-
-Mandate:
-1. Categorize all mandatory documents into the 3 envelopes required by Article 47 of Loi n° 23-12:
-   - Envelope A (Dossier de Candidature)
-   - Envelope B (Offre Technique)
-   - Envelope C (Offre Financière)
-   For each document, specify whether the bidder satisfies it (COMPLIANT) or lacks it (NON_COMPLIANT).
-2. Draft a formal French "Mémoire Technique Justificatif" tailored specifically to the actual requirements of this tender.
-`;
-
-    let gemmaPass1Thought = '';
-    let gemmaPass1Text = '';
-    let executionMode: AnalysisResponse['executionMode'] = 'LOCAL_DETERMINISTIC_FALLBACK';
-    let modelUsed = 'gemma-4-26b-a4b-it';
-
-    try {
-      const gemmaPass1 = await callGemma4(pass1Prompt, {
-        systemInstruction: extractorSkill.instructions,
+      const finalReport = await gemmaClient.generate(reportPrompt, {
+        timeoutMs: 8000,
+        fallbackText: deterministicMemoire,
       });
-      gemmaPass1Thought = gemmaPass1.thoughtTrace;
-      gemmaPass1Text = gemmaPass1.finalText;
-      executionMode = gemmaPass1.provider;
-      modelUsed = gemmaPass1.modelUsed;
-    } catch (err: any) {
-      console.warn('[API Pass 1] Gemma call fell back to local engine:', err.message);
-    }
 
-    // Build assembled Pass 1 result
-    const pass1Result = {
-      ...localBaseline.pass1Result,
-    };
-    if (gemmaPass1Text && gemmaPass1Text.length > 150) {
-      pass1Result.memoireTechnique.fullMarkdown = gemmaPass1Text;
-    }
-
-    // Collect all missing/non-compliant items from Pass 1
-    const allEnvelopeItems = [
-      ...pass1Result.envelopes.envelopeA.items,
-      ...pass1Result.envelopes.envelopeB.items,
-      ...pass1Result.envelopes.envelopeC.items,
-    ];
-    const missingItems = allEnvelopeItems.filter((i) => i.status === 'NON_COMPLIANT');
-
-    // =========================================================================
-    // STEP 2 — Deterministic TypeScript BPU Math Engine (Zero Hallucination)
-    // =========================================================================
-    const bpuAudit = auditBpuItems(activeBpuItems, tenderData.id, rawTenderText);
-    const bpuMathErrors = bpuAudit.errorDescriptions;
-
-    // =========================================================================
-    // STEP 3 — Context-Locked Agent Pass 2 (COPEO Disqualification Critic)
-    // =========================================================================
-    // STRICT ANTI-CONTRADICTION LOCK: Feed Pass 2 the exact missing items and math errors
-    const requiredTurnover = extractRequiredTurnover(rawTenderText);
-    const requiredCerts = extractRequiredCerts(rawTenderText);
-    const startupClauses = classifyStartupClauses(rawTenderText);
-    const pass2Prompt = `
-You are executing SKILL: ${criticSkill.metadata.name}
-Instructions:
-${criticSkill.instructions}
-
-CRITICAL ANTI-CONTRADICTION & STRICT CONTEXT INSTRUCTION:
-You are the strict President of the COPEO. Your verdict MUST be 100% consistent with Pass 1 and the Deterministic Math Engine.
-DO NOT use cached or demo scenarios (such as Sonelgaz or CHU unless explicitly written in the tender text below).
-Analyze the actual uploaded document and bidder qualifications.
-
-Pass 1 Missing Documents (Defects Found):
-${JSON.stringify(missingItems, null, 2)}
-
-Deterministic BPU Math Status:
-Status: ${bpuAudit.status || 'AUDITED'}
-${bpuAudit.status === 'BPU_DATA_NOT_FOUND' ? 'CRITICAL ALERT: BPU Data Not Found in the document! Financial Offer cannot be verified.' : ''}
-${bpuAudit.status === 'UNVERIFIED' ? 'ALERT: BPU Data extracted but UNVERIFIED against a declared Total HT at table bottom.' : ''}
-${bpuAudit.status === 'ARITHMETIC_ERROR' ? 'CRITICAL ALERT: BPU Arithmetic Error detected in line items or grand total discrepancy!' : ''}
-Deterministic BPU Math Errors / Warnings Found:
-${JSON.stringify(bpuMathErrors, null, 2)}
-
-Bidder Profile:
-${JSON.stringify(companyProfile, null, 2)}
-
-Tender Eliminatory Clauses & Document Excerpt:
-${rawTenderText.slice(0, 5000)}
-
-Rules:
-1. Every item in missingItems, bpuMathErrors, and any unfulfilled requirement in the tender text MUST appear in your criticalTrapsFound list.
-2. If BPU Data is not found, you MUST flag it as a critical trap in Envelope C.
-3. If missingItems.length > 0 or bpuAudit.hasErrors or bpuAudit.status === 'BPU_DATA_NOT_FOUND' or bpuAudit.status === 'ARITHMETIC_ERROR', eliminationRiskPercent MUST be >= 15% (triggering CRITICAL_DISQUALIFICATION_WARNING).
-4. If the bidder is a Labelled Startup and the tender allows Loi 23-12 Art. 87 exemptions, confirm the exemptions and verify if risk is under 15%.
-5. NUMERICAL COMPARISON: Convert every numeric threshold to integer DZD and compare with the bidder profile. If actual < required, emit TRAP-FINANCIAL-INSUFFICIENCY (FATAL).
-   Deterministic extraction -> Required turnover: ${requiredTurnover ? requiredTurnover.requiredValueDZD + ' DZD' : 'none stated'} | Bidder turnover: ${Math.round(companyProfile.avgAnnualTurnoverDZD || 0)} DZD.
-6. EXHAUSTIVE MANDATORY AUDIT: Required certifications found in the text: ${JSON.stringify(requiredCerts)}. Check EVERY item; emit one SEPARATE FATAL trap for EACH certification the bidder lacks (e.g. ISO 9001, ISO 27001, ISO 14001, MAF). Never stop at the first.
-7. LEGAL LOGIC: A startup EXEMPTION clause ("dispensées de fournir les bilans", "exempted") is NOT a reservation. Only emit TRAP-STARTUP-RESERVATION if the text says "réservé exclusivement aux start-up". Deterministic classification: ${JSON.stringify(startupClauses)}.
-8. BPU-DQE CROSS-CHECK: If declared Total HT differs from calculated sum by > 1%, emit TRAP-BPU-ARITHMETIC (FATAL). If Total HT is missing from the table bottom, flag as UNVERIFIED.
-`;
-
-    let gemmaPass2Thought = '';
-    try {
-      const gemmaPass2 = await callGemma4(pass2Prompt, {
-        systemInstruction: criticSkill.instructions,
-      });
-      gemmaPass2Thought = gemmaPass2.thoughtTrace;
-      if (gemmaPass2.provider !== 'LOCAL_DETERMINISTIC_FALLBACK') {
-        executionMode = gemmaPass2.provider;
-        modelUsed = gemmaPass2.modelUsed;
+      if (finalReport.finalText && !finalReport.finalText.trim().startsWith('{')) {
+        finalReportText = finalReport.finalText;
       }
-    } catch (err: any) {
-      console.warn('[API Pass 2] Gemma call fell back to local engine:', err.message);
+      finalThoughtTrace = finalReport.thoughtTrace || aiResponse.thoughtTrace;
+      finalModelUsed = finalReport.modelUsed || aiResponse.modelUsed || 'gemma-4-26b-a4b-it';
     }
 
-    // Build assembled Pass 2 critic result
-    const pass2Critic = {
-      ...localBaseline.pass2Critic,
-    };
-
-    // Unify fatalTrapsIdentified AND criticalTrapsFound so UI never hits undefined
-    const mergedTraps: FatalTrap[] = [
-      ...(pass2Critic.criticalTrapsFound || pass2Critic.fatalTrapsIdentified || []),
-    ];
-    pass2Critic.fatalTrapsIdentified = mergedTraps;
-    pass2Critic.criticalTrapsFound = mergedTraps;
-
-    // =========================================================================
-    // DETERMINISTIC TYPESCRIPT POST-LOCK (Guarantees 0% Contradiction in UI)
-    // =========================================================================
-    const hasDefects =
-      missingItems.length > 0 ||
-      bpuAudit.hasErrors ||
-      bpuAudit.status === 'BPU_DATA_NOT_FOUND' ||
-      mergedTraps.length > 0;
-
-    if (hasDefects) {
-      // Force risk >= 35% (well above 15% boundary)
-      pass2Critic.eliminationRiskPercent = Math.max(pass2Critic.eliminationRiskPercent || 0, 35);
-      pass2Critic.status = 'CRITICAL_DISQUALIFICATION_WARNING';
-      pass2Critic.isDisqualifiedWarning = true;
-      pass2Critic.readyToSubmit = false;
-
-      // Handle BPU Data Not Found defect
-      if (bpuAudit.status === 'BPU_DATA_NOT_FOUND') {
-        const alreadyFlagged = mergedTraps.some((t) => t.trapId.includes('BPU-DATA-NOT-FOUND'));
-        if (!alreadyFlagged) {
-          const trap: FatalTrap = {
-            trapId: 'TRAP-BPU-DATA-NOT-FOUND',
-            severity: 'HIGH',
-            cause: 'BPU Data Not Found : Aucun tableau de bordereau des prix unitaires structuré n\'a été extrait du document pour contrôle arithmétique.',
-            legalBasis: 'Loi n° 23-12 Art. 47 & 72',
-            correctionRequired: 'Saisir ou formater les lignes du BPU pour permettre le contrôle arithmétique COPEO.',
-          };
-          mergedTraps.push(trap);
-        }
-      }
-
-      // Merge every missing document into fatalTrapsIdentified and criticalTrapsFound
-      for (const missing of missingItems) {
-        const alreadyFlagged = mergedTraps.some(
-          (t) => t.trapId.includes(missing.id) || t.cause.toLowerCase().includes(missing.label.toLowerCase())
-        );
-
-        if (!alreadyFlagged) {
-          const trap: FatalTrap = {
-            trapId: `TRAP-${missing.id}`,
-            severity: missing.isEliminatory ? 'FATAL' : 'HIGH',
-            cause: `Document manquant ou non conforme : ${missing.label}`,
-            legalBasis: missing.legalReference || 'Loi n° 23-12 Art. 47',
-            correctionRequired: `Fournir impérativement la pièce : ${missing.label} avant l'ouverture des plis.`,
-          };
-          mergedTraps.push(trap);
-        }
-      }
-
-      // Merge every arithmetic discrepancy into fatalTrapsIdentified and criticalTrapsFound
-      for (const errDesc of bpuMathErrors) {
-        const alreadyFlagged = mergedTraps.some(
-          (t) => t.trapId.includes('BPU') || t.cause.includes(errDesc)
-        );
-
-        if (!alreadyFlagged) {
-          const trap: FatalTrap = {
-            trapId: 'TRAP-BPU-ARITHMETIC',
-            severity: 'FATAL',
-            cause: errDesc,
-            legalBasis: 'Loi n° 23-12 Art. 72 (Rectification des erreurs arithmétiques)',
-            correctionRequired: 'Corriger l\'addition du BPU/DQE pour rétablir la concordance arithmétique.',
-          };
-          mergedTraps.push(trap);
-        }
-      }
-
-      // Re-assign unified reference
-      pass2Critic.fatalTrapsIdentified = mergedTraps;
-      pass2Critic.criticalTrapsFound = mergedTraps;
-
-      pass2Critic.copeoPresidentVerdict = `🚨 VERDICT COPEO : REJET IMMÉDIAT EN COMMISSION. Risque d'élimination évalué à ${pass2Critic.eliminationRiskPercent}% (dépassement critique du seuil de sécurité de 15%). La Commission d'Ouverture des Plis et d'Évaluation des Offres rejettera cette offre dès l'ouverture des plis pour non-conformité aux dispositions de la Loi n° 23-12 (${mergedTraps.length} vices éliminatoires constatés).`;
-    } else {
-      // Clean pass
-      pass2Critic.status = 'SAFE';
-      pass2Critic.isDisqualifiedWarning = false;
-      pass2Critic.readyToSubmit = true;
-      if (pass2Critic.eliminationRiskPercent >= 15) {
-        pass2Critic.eliminationRiskPercent = 4;
-      }
-      pass2Critic.fatalTrapsIdentified = mergedTraps;
-      pass2Critic.criticalTrapsFound = mergedTraps;
-      pass2Critic.copeoPresidentVerdict = `✅ VERDICT COPEO : OFFRE QUALIFIÉE POUR ÉVALUATION. Risque d'élimination résiduel estimé à ${pass2Critic.eliminationRiskPercent}% (< 15%). Le dossier respecte les exigences de la Loi n° 23-12 et bénéficie des dispenses légales applicables. L'accès à la phase d'évaluation technique et financière est garanti.`;
-    }
-
-    // Assemble thought trace from Gemma 4 CoT
-    const thoughtTraceParts: string[] = [];
-    if (gemmaPass1Thought) {
-      thoughtTraceParts.push(`[GEMMA 4 PASS 1 EXTRACTOR REASONING TRACE]\n${gemmaPass1Thought}`);
-    }
-    if (gemmaPass2Thought) {
-      thoughtTraceParts.push(`[GEMMA 4 PASS 2 COPEO CRITIC REASONING TRACE]\n${gemmaPass2Thought}`);
-    }
-    if (thoughtTraceParts.length === 0) {
-      thoughtTraceParts.push(localBaseline.thoughtTrace);
-    }
-
-    const finalThoughtTrace = thoughtTraceParts.join('\n\n');
-
-    const response: AnalysisResponse = {
-      pass1Result,
-      pass2Critic,
-      bpuAudit,
+    // --- PHASE 4: UNIFIED RESPONSE ---
+    const responsePayload = {
+      metadata: {
+        title: extractedData.tenderTitle,
+        reference: extractedData.tenderReference,
+        authority: extractedData.issuingAuthority,
+      },
+      legalAudit: legalAudit,
+      bpuAudit: bpuAudit,
+      finalReport: finalReportText,
+      memoireTechnique: {
+        title: `MÉMOIRE TECHNIQUE JUSTIFICATIF — ${extractedData.tenderTitle}`,
+        fullMarkdown: finalReportText,
+      },
       thoughtTrace: finalThoughtTrace,
-      activeSkillsUsed,
-      modelUsed,
-      executionMode,
-      timestamp: new Date().toISOString(),
+      modelUsed: finalModelUsed,
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json({
+      success: true,
+      ...responsePayload,
+      data: responsePayload,
+    });
   } catch (error: any) {
-    console.error('[API /api/analyze-tender] Unexpected error:', error);
+    console.error('Critical Audit Error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error during tender analysis' },
+      {
+        error: 'Audit Pipeline Failure',
+        details: error.message,
+      },
       { status: 500 }
     );
   }
