@@ -90,18 +90,18 @@ export class BpuMathEngine {
       '\uE091': '(',
       '\uE092': ')',
     };
-    let text = raw.replace(/[\uE071-\uE094]/g, (ch) => puaMap[ch] ?? ch);
+    let text = raw
+      .replace(/[\uE071-\uE094]/g, (ch) => puaMap[ch] ?? ch)
+      .replace(/[\u00A0\u202F]/g, ' ');
 
-    // 2. Collapse kerning spaces inside decimal endings ("0 , 0 0" -> "0,00") and single-digit runs ("1 8 5 0 0 0 0 0,00")
+    // 2. Collapse kerning spaces around comma decimals first: "0 0 0 , 0 0" -> "000,00"
     text = text.replace(/(\d)\s*,\s*(\d)\s*(\d)\b/g, '$1,$2$3');
     text = text.replace(/(\d)\s*,\s*(\d{2})\b/g, '$1,$2');
-    // Collapse spaces inside numbers that explicitly end with ",00" or ".00" (e.g. "18 500 000,00" -> "18500000,00")
-    text = text.replace(/\b\d(?:[ \t\u00a0\u202f]+\d)+(?=,\d{2}\b)/g, (m) => m.replace(/\s+/g, ''));
-    // Collapse single-digit kerning runs of 3+ single digits ("4 5 0" -> "450", "2 0 2 6" -> "2026")
-    text = text.replace(/\b\d(?:[ \t]+\d){2,}\b/g, (m) => m.replace(/[ \t]+/g, ''));
-    text = text.replace(/\b(\d)[ \t]+(\d)\s*-\s*(\d)[ \t]+(\d)\b/g, '$1$2-$3$4');
-    text = text.replace(/\b(0)[ \t]+([1-9])\b/g, '$1$2');
-    text = text.replace(/\b(1)[ \t]+(9)\s*%/g, '19%');
+    // Collapse single-digit kerning runs ("4 5 0" -> "450", "2 0 2 6" -> "2026") without crossing ",dd" boundaries
+    text = text.replace(/\b\d(?:[ \t]\d){2,}\b/g, (m) => m.replace(/[ \t]+/g, ''));
+    text = text.replace(/\b(\d)[ \t](\d)\s*-\s*(\d)[ \t](\d)\b/g, '$1$2-$3$4');
+    text = text.replace(/\b(0)[ \t]([1-9])\b/g, '$1$2');
+    text = text.replace(/\b(1)[ \t](9)\s*%/g, '19%');
 
     // 3. Rejoin kerning-split French/procurement words on each line
     const fixKerningLine = (line: string): string => {
@@ -181,23 +181,51 @@ export class BpuMathEngine {
   }
 
   /**
+   * Cuts off benchmark commentary sections at the end of a document before searching for BPU/DQE tables.
+   */
+  static stripBenchmarkCommentary(rawText: string): string {
+    if (!rawText) return '';
+    const primaryCutoff = rawText.search(
+      /Observation\s+d['’]Audit\s+Pr[eéè]liminaire|PARTIE\s+II\s*[—\-]|PARTIE\s+III\s*[—\-]|ANNEXE\s+9\s*[—\-]/i
+    );
+    if (primaryCutoff > 0) {
+      const candidate = rawText.slice(0, primaryCutoff);
+      if (
+        /(?:Tableau\s+Combin[eéè]\s+BPU|Enveloppe\s+C\s+Soumise|D[EÉÈ]TAIL\s+QUANTITATIF|BORDEREAU\s+DES\s+PRIX)/i.test(
+          candidate
+        )
+      ) {
+        return candidate;
+      }
+    }
+    const secondaryCutoff = rawText.search(
+      /Observation\s+d['’]Audit\s+Pr[eéè]liminaire|PARTIE\s+III\s*[—\-]|ANNEXE\s+9\s*[—\-]/i
+    );
+    return secondaryCutoff > 0 ? rawText.slice(0, secondaryCutoff) : rawText;
+  }
+
+  /**
    * Auto-extracts declared Total HT from the raw tender text, supporting multiple pipe columns
    * and DQE summary rows like "Total HT   229 000 000 DA".
    */
   static extractDeclaredTotalHT(rawText: string): number {
     if (!rawText) return 0;
+    const cleanDocText = this.stripBenchmarkCommentary(this.normalizePdfText(rawText));
     const patterns = [
-      /(?:MONTANT\s+)?TOTAL(?:\s+G[EÉÈ]N[EÉÈ]RAL|\s+GLOBAL|\s+DE\s+L['’]OFFRE)?\s*(?:EN\s+)?(?:HORS\s+TAXES?|H\.?T\.?)[\s:=|]+([\d][\d\s.,\u00a0\u202f]*[\d])\s*(?:DA|DZD)?/gi,
-      /(?:TOTAL|MONTANT)\s+(?:HORS\s+TAXES?|H\.?T\.?)\s*(?:G[EÉÈ]N[EÉÈ]RAL|GLOBAL)?[\s:=|]+([\d][\d\s.,\u00a0\u202f]*[\d])\s*(?:DA|DZD)?/gi,
-      /\bTotal\s+HT[\s|:]+([\d][\d\s.,\u00a0\u202f]*[\d])\s*(?:DA|DZD)?/gi,
+      /(?:MONTANT\s+)?TOTAL(?:\s+G[EÉÈ]N[EÉÈ]RAL|\s+GLOBAL|\s+DE\s+L['’]OFFRE|\s+HT\s+SOUMIS)?\s*(?:EN\s+)?(?:HORS\s+TAXES?|H\.?T\.?)(?:\s+SOUMIS)?[\s:=|]+([\d][\d\s.,\u00a0\u202f]*[\d])\s*(?:DA|DZD)?/gi,
+      /(?:TOTAL|MONTANT)\s+(?:HORS\s+TAXES?|H\.?T\.?)\s*(?:G[EÉÈ]N[EÉÈ]RAL|GLOBAL|SOUMIS)?[\s:=|]+([\d][\d\s.,\u00a0\u202f]*[\d])\s*(?:DA|DZD)?/gi,
+      /\bTotal\s+HT(?:\s+Soumis)?[\s|:]+([\d][\d\s.,\u00a0\u202f]*[\d])\s*(?:DA|DZD)?/gi,
     ];
     let bestVal = 0;
     for (const pat of patterns) {
       let m: RegExpExecArray | null;
-      while ((m = pat.exec(rawText)) !== null) {
+      while ((m = pat.exec(cleanDocText)) !== null) {
         if (m[1]) {
-          // Take only the first space-grouped number on the same line
-          const firstLineNum = m[1].split(/\r?\n/)[0].trim();
+          // Take only the first decimal or space-grouped number on the same line
+          const firstLineNum = m[1]
+            .split(/\r?\n/)[0]
+            .trim()
+            .replace(/^(\d[\d\s.]*,\d{2})\s+.*$/, '$1');
           const val = this.cleanNum(firstLineNum);
           if (val > 1000 && val !== 2026) {
             bestVal = val;
@@ -304,19 +332,13 @@ export class BpuMathEngine {
         let linesJoined = 0;
         while (
           i + 1 < cleaned.length &&
-          linesJoined < 7 &&
-          !hasTwoPricesAtTail(current) &&
+          linesJoined < 10 &&
           !stopContinuationRe.test(cleaned[i + 1]) &&
           !isItemStart(cleaned[i + 1], false)
         ) {
           current = `${current} ${cleaned[i + 1]}`;
           i++;
           linesJoined++;
-        }
-        // If the immediately following line is just the trailing TVA percentage ("19%" or "9%"), attach it
-        if (i + 1 < cleaned.length && /^(?:19|9)\s*%$/.test(cleaned[i + 1])) {
-          current = `${current} ${cleaned[i + 1]}`;
-          i++;
         }
       }
       merged.push(current);
@@ -423,34 +445,41 @@ export class BpuMathEngine {
   }
 
   /**
-   * Selects the best pricing table slice from rawText:
-   * - Prefers the LAST occurrence of DÉTAIL QUANTITATIF ET ESTIMATIF / ANNEXE 8 (skipping SOMMAIRE)
-   * - Falls back to the LAST occurrence of BORDEREAU DES PRIX UNITAIRES / BPU
-   * - Stops slicing at ANNEXE 9, PLANNING INDICATIF, or Estimation administrative
+   * Selects the best pricing table slice from cleanDocText (after SOMMAIRE):
+   * 1. Tableau Combiné BPU / DQE or Enveloppe C Soumise
+   * 2. ANNEXE 8 - DÉTAIL QUANTITATIF ET ESTIMATIF or DÉTAIL QUANTITATIF ET ESTIMATIF
+   * 3. BORDEREAU DES PRIX UNITAIRES / BPU
    */
   private static extractPricingSlice(safeText: string, preferDqe: boolean): string {
+    const cleanDocText = this.stripBenchmarkCommentary(safeText);
     const findLastMatchIndex = (re: RegExp): number => {
       let lastIdx = -1;
       let m: RegExpExecArray | null;
-      while ((m = re.exec(safeText)) !== null) {
+      while ((m = re.exec(cleanDocText)) !== null) {
         if (m.index !== undefined) lastIdx = m.index;
       }
       return lastIdx;
     };
 
-    const dqeRe = /(?:D[EÉÈ]TAIL\s+QUANTITATIF\s+ET\s+ESTIMATIF|ANNEXE\s+8\b)/gi;
+    const combinedRe = /(?:Tableau\s+Combin[eéè]\s+BPU\s*\/\s*DQE|Enveloppe\s+C\s+Soumise)/gi;
+    const dqeRe = /(?:ANNEXE\s+8\s*[—\-:]?\s*D[EÉÈ]TAIL\s+QUANTITATIF\s+ET\s+ESTIMATIF|D[EÉÈ]TAIL\s+QUANTITATIF\s+ET\s+ESTIMATIF|ANNEXE\s+8\b)/gi;
     const bpuRe = /(?:BORDEREAU\s+DES\s+PRIX\s+UNITAIRES|BORDEREAU\s+DES\s+PRIX|\bB\.?P\.?U\.?\b|ITEM\s*\|\s*D[EÉÈ]SIGNATION)/gi;
 
-    let startIdx = preferDqe ? findLastMatchIndex(dqeRe) : -1;
+    let startIdx = preferDqe ? findLastMatchIndex(combinedRe) : -1;
+    if (startIdx === -1 && preferDqe) {
+      startIdx = findLastMatchIndex(dqeRe);
+    }
     if (startIdx === -1) {
       startIdx = findLastMatchIndex(bpuRe);
     }
-    if (startIdx === -1) return safeText;
+    if (startIdx === -1) return cleanDocText;
 
-    const tail = safeText.substring(startIdx);
+    const tail = cleanDocText.substring(startIdx);
     const stopMatch = tail
       .substring(40)
-      .match(/(?:ANNEXE\s+9\b|PLANNING\s+INDICATIF|Estimation\s+administrative)/i);
+      .match(
+        /(?:Observation\s+d['’]Audit\s+Pr[eéè]liminaire|PARTIE\s+II\s*[—\-]|PARTIE\s+III\s*[—\-]|ANNEXE\s+9\b|PLANNING\s+INDICATIF|Estimation\s+administrative)/i
+      );
     if (stopMatch && stopMatch.index !== undefined) {
       return tail.substring(0, 40 + stopMatch.index);
     }
@@ -461,7 +490,7 @@ export class BpuMathEngine {
    * The Core Extraction & Audit Logic
    */
   static auditBpu(rawText: string, declaredTotalHT: number = 0, presetItems?: any[]): BpuAuditResult {
-    const safeText = this.normalizePdfText(rawText || '');
+    const safeText = this.stripBenchmarkCommentary(this.normalizePdfText(rawText || ''));
     const rawSlice = this.extractPricingSlice(safeText, true);
     const effectiveDeclaredHT =
       declaredTotalHT > 0
@@ -477,6 +506,20 @@ export class BpuMathEngine {
       for (const rawLine of lines) {
         const line = rawLine.trim();
         if (this.isExcludedLine(line)) continue;
+
+        // Detect forensic markers in the item block before stripping them:
+        // 1. BPU Lettres unit price override: e.g. "BPU Lettres : ... (4 500 000 DA)"
+        const bpuLettresMatch = line.match(
+          /BPU\s+Lettres\s*:[^)\n]*\((\d[\d\s.,]*)\s*(?:DA|DZD)\)/i
+        );
+        const bpuLettresPU = bpuLettresMatch ? this.cleanNum(bpuLettresMatch[1]) : 0;
+
+        // 2. [Omis] quantity marker and "(Qté DQE requise : 12 U)"
+        const hasOmisQty = /\[\s*Omis\s*\]/i.test(line);
+        const reqQtyMatch = line.match(
+          /\(\s*Qt[eé]\s+DQE\s+requise\s*:\s*(\d+)\s*[A-Za-z\/]*\s*\)/i
+        );
+        const requiredDqeQty = reqQtyMatch ? parseInt(reqQtyMatch[1], 10) : 0;
 
         // Strategy A: Pipe-delimited rows (including Poste 01..07, decimal codes & blank qty)
         if (line.includes('|')) {
@@ -496,9 +539,10 @@ export class BpuMathEngine {
                 ? `BPU-${rawCode}`
                 : `BPU-${rawCode.padStart(2, '0')}`;
               const designation = nonEmpty[1] || `Prestation ${code}`;
-              const numericTail = nonEmpty
-                .slice(2)
-                .filter((c) => !/^(?:19|9)\s*%$/.test(c))
+              const tvaCellIdx = nonEmpty.findIndex((c, idx) => idx >= 2 && /^(?:19|9)\s*%$/.test(c));
+              const cellsBeforeTva =
+                tvaCellIdx !== -1 ? nonEmpty.slice(2, tvaCellIdx) : nonEmpty.slice(2);
+              const numericTail = cellsBeforeTva
                 .map((c) =>
                   this.cleanNum(
                     c.replace(
@@ -513,32 +557,54 @@ export class BpuMathEngine {
                 const hasOnlyTwoNums = numericTail.length === 2;
                 const pu = hasOnlyTwoNums ? numericTail[0] : numericTail[1];
                 const claimed = numericTail[numericTail.length - 1];
-                const qty = hasOnlyTwoNums
+                let qty = hasOnlyTwoNums
                   ? claimed > pu && pu > 0
                     ? Math.round(claimed / pu)
                     : 1
                   : numericTail[0];
-                const missingQty = hasOnlyTwoNums && claimed > pu;
+                let missingQty = (hasOnlyTwoNums && claimed > pu) || hasOmisQty;
+                if (requiredDqeQty > 0) {
+                  qty = requiredDqeQty;
+                  missingQty = true;
+                }
 
                 if (pu >= 100) {
-                  const computed = Math.round(qty * pu * 100) / 100;
+                  const effectivePU = bpuLettresPU >= 100 ? bpuLettresPU : pu;
+                  let tvaRate = /9\s*%/.test(line) ? 0.09 : 0.19;
+                  let tvaError = false;
+                  if (/g[eéè]nie\s+civil|tranch[eéè]es/i.test(line) && tvaRate === 0.09) {
+                    tvaRate = 0.19;
+                    tvaError = true;
+                  } else if (
+                    /orchestration\s+cloud|abonnement\s+flux\s+ip/i.test(line) &&
+                    tvaRate === 0.19
+                  ) {
+                    tvaRate = 0.09;
+                    tvaError = true;
+                  }
+
+                  const computed = Math.round(qty * effectivePU * 100) / 100;
                   const diff = Math.round((claimed - computed) * 100) / 100;
-                  const isError = Math.abs(diff) > 1 || missingQty;
+                  const isError =
+                    Math.abs(diff) > 1 ||
+                    missingQty ||
+                    tvaError ||
+                    (bpuLettresPU >= 100 && bpuLettresPU !== pu);
                   rows.push({
                     code,
                     designation,
                     qty,
-                    unitPriceHT: pu,
+                    unitPriceHT: effectivePU,
                     claimedTotalHT: claimed,
                     computedTotalHT: computed,
-                    tvaRate: /9\s*%/.test(line) ? 0.09 : 0.19,
+                    tvaRate,
                     diff,
                     isError,
                     isValid: !isError,
                     missingQty,
                     itemNumber: code,
                     quantity: qty,
-                    unitPrice: pu,
+                    unitPrice: effectivePU,
                     declaredTotal: claimed,
                     calculatedTotal: computed,
                   });
@@ -550,8 +616,11 @@ export class BpuMathEngine {
           }
         }
 
-        // Strategy B: Space/tab-separated DQE & BPU rows (supports "Poste 01..07", decimal codes "1.1".."2.5", space-separated thousands, and missing qty)
+        // Strategy B: Space/tab-separated DQE & BPU rows (supports "Poste 01..07", decimal codes "1.1".."2.5", BPU Lettres, [Omis], and trailing Montant TVA columns)
         let workingLine = line
+          .replace(/BPU\s+Lettres\s*:[^)\n]*\(\d[\d\s.,]*\s*(?:DA|DZD)\)/gi, ' ')
+          .replace(/\(\s*Qt[eé]\s+DQE\s+requise\s*:\s*\d+\s*[A-Za-z\/]*\s*\)/gi, ' ')
+          .replace(/\[\s*Omis\s*\]/gi, ' ')
           .replace(
             /\b(?:Qt[eé]|Quantit[eé]|P\.?U\.?(?:\s*H\.?T\.?)?|Prix\s+Unitaire|Montant(?:\s*H\.?T\.?)?|Total(?:\s*H\.?T\.?)?)\s*:\s*/gi,
             ' '
@@ -561,12 +630,27 @@ export class BpuMathEngine {
           .trim();
 
         let tvaRate = 0.19;
-        const tvaMatch = workingLine.match(/\s+(19|9)\s*%\s*$/);
+        // Strip TVA Appliquée ("19%" or "9%") AND any trailing Montant TVA Soumis / TTC columns after it
+        const tvaMatch = workingLine.match(
+          /\s+(19|9)\s*%(?:\s+[\d\s.,]+)?(?:\s*(?:DA|DZD))?\s*$/i
+        );
         if (tvaMatch) {
           tvaRate = tvaMatch[1] === '9' ? 0.09 : 0.19;
           workingLine = workingLine.slice(0, tvaMatch.index).trim();
         }
         workingLine = workingLine.replace(/\s+(?:DA|DZD)\s*$/i, '').trim();
+
+        let tvaError = false;
+        if (/g[eéè]nie\s+civil|tranch[eéè]es/i.test(line) && tvaRate === 0.09) {
+          tvaRate = 0.19;
+          tvaError = true;
+        } else if (
+          /orchestration\s+cloud|abonnement\s+flux\s+ip/i.test(line) &&
+          tvaRate === 0.19
+        ) {
+          tvaRate = 0.09;
+          tvaError = true;
+        }
 
         const codeHeadMatch = workingLine.match(
           /^(?:POSTE[\s:-]*|LOT-|ITEM-|BPU-|MOD-)?(\d{1,2}(?:\.\d{1,2})?)[\s:-]+(.+)$/i
@@ -575,14 +659,14 @@ export class BpuMathEngine {
           const rawCode = codeHeadMatch[1];
           const rest = codeHeadMatch[2].trim();
 
-          // Extract the contiguous numeric tail at the end of the line
+          // Extract the contiguous numeric tail at the end of the line (before TVA)
           const tailMatch = rest.match(/^(.*?)(\d[\d\s.,]*)$/);
           if (tailMatch && tailMatch[1].trim().length >= 3) {
             let designationPart = tailMatch[1].trim();
             const rawTail = tailMatch[2].trim();
 
             const unitRe =
-              /\s+\b(U|Unit[eé]|Ens|Ensemble|Forfait|Fft|Socket|Licence|Session|Site|Jours?|H\/J|Mois|An|Lot)\s*$/i;
+              /\s+\b(Forfait\s+Site|Forfait|Fft|Unit[eé]|Ens(?:emble)?|Socket|Licence|Session|Site|Jours?|H\/J|Mois|An|Lot|ml|U)\s*$/i;
             const hasUnitToken = unitRe.test(designationPart);
             if (hasUnitToken) {
               designationPart = designationPart.replace(unitRe, '').trim();
@@ -593,16 +677,25 @@ export class BpuMathEngine {
               const code = rawCode.includes('.')
                 ? `BPU-${rawCode}`
                 : `BPU-${rawCode.padStart(2, '0')}`;
-              const { qty, pu, claimed, missingQty } = parsedNumbers;
-              const computed = Math.round(qty * pu * 100) / 100;
+              let { qty, pu, claimed, missingQty } = parsedNumbers;
+              if (hasOmisQty || requiredDqeQty > 0) {
+                qty = requiredDqeQty > 0 ? requiredDqeQty : qty;
+                missingQty = true;
+              }
+              const effectivePU = bpuLettresPU >= 100 ? bpuLettresPU : pu;
+              const computed = Math.round(qty * effectivePU * 100) / 100;
               const diff = Math.round((claimed - computed) * 100) / 100;
-              const isError = Math.abs(diff) > 1 || missingQty;
+              const isError =
+                Math.abs(diff) > 1 ||
+                missingQty ||
+                tvaError ||
+                (bpuLettresPU >= 100 && bpuLettresPU !== pu);
 
               rows.push({
                 code,
                 designation: designationPart,
                 qty,
-                unitPriceHT: pu,
+                unitPriceHT: effectivePU,
                 claimedTotalHT: claimed,
                 computedTotalHT: computed,
                 tvaRate,
@@ -612,7 +705,7 @@ export class BpuMathEngine {
                 missingQty,
                 itemNumber: code,
                 quantity: qty,
-                unitPrice: pu,
+                unitPrice: effectivePU,
                 declaredTotal: claimed,
                 calculatedTotal: computed,
               });

@@ -72,38 +72,46 @@ function buildDeterministicMemoire(
  * Handles both multi-line text and pdf.js single-line flattened pages.
  */
 function extractDeterministicBaseline(rawText: string, tenderData?: any) {
-  const text = BpuMathEngine.normalizePdfText(rawText || '');
+  const fullNormalized = BpuMathEngine.normalizePdfText(rawText || '');
+  const text = BpuMathEngine.stripBenchmarkCommentary(fullNormalized);
 
   // 1. Tender Title (multi-line "Objet : ...", stopping cleanly before metadata/section headers)
   const objetMatch = text.match(
-    /Objet\s*(?:du\s+march[eéè]|\s*de\s+la\s+consultation|\s*de\s+l['’]appel\s+d['’]offres)?\s*:\s*([\s\S]{5,350}?)(?=\r?\n\s*(?:Lot\b|Financement\b|Cadre\s+l[eéè]gal\b|R[eéè]f[eéè]rence\b|Ma[îi]tre\s+d['’]ouvrage\b|\d+\.\s+[A-ZÉÈÀ]|PARTIE\s+[I1V]|Article\s+\d)|\s+\d+\.\s+[A-ZÉÈÀ]|\s+SECTION\s+\d|\s+CONFORM[EÉÈ]MENT|\s+Article\s+\d)/i
+    /Objet\s*(?:du\s+march[eéè]|\s*de\s+la\s+consultation|\s*de\s+l['’]appel\s+d['’]offres|\s*du\s+cahier\s+des\s+charges)?\s*:\s*([\s\S]{5,420}?)(?=\r?\n\s*(?:Lot\b|Allotissement\b|Mode\s+de\s+passation\b|Nature\b|Financement\b|Cadre\s+l[eéè]gal\b|R[eéè]f[eéè]rence\b|Ma[îi]tre\s+d['’]ouvrage\b|Autorit[eé]\s+contractante\b|\d+\.\s+[A-ZÉÈÀ]|PARTIE\s+[I1V]|SECTION\s+[I1V\d]|CHAPITRE\b|Article\s+\d)|\s+\d+\.\s+[A-ZÉÈÀ]|\s+SECTION\s+\d|\s+CONFORM[EÉÈ]MENT|\s+Article\s+\d)/i
   );
   const tenderTitle =
     objetMatch?.[1]?.replace(/\s+/g, ' ').trim() ||
     (tenderData?.title && !tenderData.title.startsWith('Cahier des Charges —') ? tenderData.title : null) ||
     'Marché Public (Loi n° 23-12)';
 
-  // 2. Tender Reference (never match "23-12", "15-247", "18-07", or legal statute numbers)
+  // 2. Tender Reference (must contain at least one digit, never match "malies" or "23-12")
+  const isValidRefCandidate = (cand: string): boolean => {
+    const c = cand.trim();
+    if (c.length < 4 || !/\d/.test(c)) return false;
+    if (/^(?:23-12|15-247|18-07|95-07|25-0841|2026|9001|14001|27001|45001)$/i.test(c)) return false;
+    return true;
+  };
+
   let tenderReference: string | null = null;
   const explicitRefPatterns = [
-    /R[eéè]f[eéè]rence(?:\s+du\s+march[eéè]|\s+de\s+l['’]appel\s+d['’]offres|\s+du\s+dossier)?\s*[:|-]\s*([A-Z0-9][A-Z0-9\/._-]{3,40})/i,
-    /\b(?:AON|AONO|AONI|AO|CONSULTATION|BAOSEM|BOMOP|APPEL\s+D['’]OFFRES[^\nN°]{0,45}?)\s+N[°o]\s*:?\s*([A-Z0-9][A-Z0-9\/._-]{3,40})/i,
+    /R[eéè]f[eéè]rence(?:\s+du\s+march[eéè]|\s+de\s+l['’]appel\s+d['’]offres|\s+du\s+dossier)?\s*[:|-]\s*([A-Z0-9][A-Z0-9\/._-]{3,45})/i,
+    /\b(?:AON|AONO|AONI|AO|CONSULTATION|BAOSEM|BOMOP|APPEL\s+D['’]OFFRES[^\nN°]{0,45}?)\s+\bN\s*[°o]\s*:?\s*([A-Z0-9][A-Z0-9\/._-]{3,45})/i,
   ];
   for (const pat of explicitRefPatterns) {
     const mRef = text.match(pat);
-    if (mRef?.[1] && !/^(?:23-12|15-247|18-07|95-07)$/i.test(mRef[1].trim())) {
+    if (mRef?.[1] && isValidRefCandidate(mRef[1])) {
       tenderReference = mRef[1].trim();
       break;
     }
   }
   if (!tenderReference) {
-    const genericRefRe = /N[°o]\s*:?\s*([A-Z0-9][A-Z0-9\/._-]{3,40})/gi;
+    const genericRefRe = /\bN\s*°\s*:?\s*([A-Z0-9][A-Z0-9\/._-]{3,45})/gi;
     let gMatch: RegExpExecArray | null;
     while ((gMatch = genericRefRe.exec(text)) !== null) {
       const candidate = gMatch[1].trim();
       const prefix = text.slice(Math.max(0, gMatch.index - 40), gMatch.index);
       if (
-        /^(?:23-12|15-247|18-07|95-07|25-0841)$/i.test(candidate) ||
+        !isValidRefCandidate(candidate) ||
         /\b(?:Loi|D[eéè]cret|Arr[êe]t[eé]|Ordonnance|Label|Agr[eéè]ment|Certificat)\b/i.test(prefix)
       ) {
         continue;
@@ -171,9 +179,38 @@ function extractDeterministicBaseline(rawText: string, tenderData?: any) {
   if (/\bCEH\b|Certified\s+Ethical\s+Hacker/i.test(text)) certs.add('CEH');
   if (/\bMAF\b|agr[eéè]ment\s+(?:de\s+)?mat[eéè]riel/i.test(text)) certs.add('MAF');
 
-  // 5. Required Professional Category (e.g. "Catégorie III", "Catégorie IV")
-  const catMatch = text.match(/cat[eéè]gorie\s*(?:professionnelle\s*)?(?::\s*)?(V|IV|III|II|I)\b/i);
-  const requiredCategory = catMatch ? catMatch[1].toUpperCase() : null;
+  // 5. Required Professional Category (e.g. "Catégorie IV" required vs "Catégorie III" submitted)
+  const catRanks: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5 };
+  let requiredCategory: string | null = null;
+  let embeddedActualCategory: string | null = null;
+
+  const submissionSplitIdx = text.search(
+    /Enveloppe\s+A\s+Soumise|Dossier\s+de\s+Candidature\s+Soumis|PROFIL\s+DU\s+SOUMISSIONNAIRE|OFFRE\s+DU\s+SOUMISSIONNAIRE/i
+  );
+  const cdcText = submissionSplitIdx > 0 ? text.slice(0, submissionSplitIdx) : text;
+  const subText = submissionSplitIdx > 0 ? text.slice(submissionSplitIdx) : '';
+
+  const catRe = /\bcat[eéè]gorie\b[^.\r\n:;]{0,40}?(?:[:=\s]\s*|\b)(V|IV|III|II|I)\b/gi;
+  let cMatch: RegExpExecArray | null;
+  while ((cMatch = catRe.exec(cdcText)) !== null) {
+    const roman = cMatch[1].toUpperCase();
+    const context = cdcText.slice(Math.max(0, cMatch.index - 50), cMatch.index + cMatch[0].length + 40);
+    if (/\b(?:soumissionnaire\s+d[eé]tient|fourni\s*:|soumis\s*:|d[eé]tenue\s*:)/i.test(context)) {
+      embeddedActualCategory = roman;
+      continue;
+    }
+    if (!requiredCategory || (catRanks[roman] || 0) > (catRanks[requiredCategory] || 0)) {
+      requiredCategory = roman;
+    }
+  }
+  if (subText) {
+    const subCatMatch = subText.match(
+      /\bcat[eéè]gorie\b[^.\r\n:;]{0,40}?(?:[:=\s]\s*|\b)(V|IV|III|II|I)\b/i
+    );
+    if (subCatMatch?.[1]) {
+      embeddedActualCategory = subCatMatch[1].toUpperCase();
+    }
+  }
 
   // 6. Required Turnover (e.g., "200 Millions DA", ">= 80 000 000 DA", "150 Millions DA")
   let requiredTurnover: number | null = null;
@@ -213,13 +250,13 @@ function extractDeterministicBaseline(rawText: string, tenderData?: any) {
   // 8. Envelope B Text (Technical Offer / Enveloppe B content & any financial leak in Envelope B)
   let envelopeBText = '';
   const envBSectionMatch = text.match(
-    /(?:ENVELOPPE\s+B\b|2\s*[\).]\s*OFFRE\s+TECHNIQUE|DOSSIER\s+TECHNIQUE\s+SOUMIS|EXTRAIT\s+DE\s+L['’]OFFRE\s+TECHNIQUE|M[EÉÈ]MOIRE\s+TECHNIQUE\s+DU\s+SOUMISSIONNAIRE)([\s\S]{10,2500}?)(?=(?:ENVELOPPE\s+C\b|3\s*[\).]\s*OFFRE\s+FINANCI[EÈ]RE|OFFRE\s+FINANCI[EÈ]RE|BORDEREAU\s+DES\s+PRIX|D[EÉÈ]TAIL\s+QUANTITATIF|ANNEXE\s+\d|$))/i
+    /(?:ENVELOPPE\s+B(?:\s+SOUMISE)?\b|2\s*[\).]\s*OFFRE\s+TECHNIQUE|OFFRE\s+TECHNIQUE\s+SOUMISE|DOSSIER\s+TECHNIQUE\s+SOUMIS|EXTRAIT\s+DE\s+L['’]OFFRE\s+TECHNIQUE|M[EÉÈ]MOIRE\s+TECHNIQUE\s+DU\s+SOUMISSIONNAIRE)([\s\S]{10,3500}?)(?=(?:ENVELOPPE\s+C\b|Tableau\s+Combin[eéè]\s+BPU|3\s*[\).]\s*OFFRE\s+FINANCI[EÈ]RE|OFFRE\s+FINANCI[EÈ]RE|BORDEREAU\s+DES\s+PRIX|D[EÉÈ]TAIL\s+QUANTITATIF|ANNEXE\s+\d|$))/i
   );
   if (envBSectionMatch?.[1]) {
     envelopeBText = envBSectionMatch[1].trim();
   }
   const explicitLeakMatch = text.match(
-    /[^\r\n]*(?:enveloppe\s+B|offre\s+technique|m[eéè]moire\s+technique)[^\r\n]{0,140}?\b\d[\d\s.,]*\s*(?:millions?\s*(?:de\s*)?)?(?:DA|DZD|Dinars?)\b[^\r\n]*/i
+    /[^\r\n]*(?:enveloppe\s+B|offre\s+technique|m[eéè]moire\s+technique)[^\r\n]{0,160}?\b\d[\d\s.,]{2,}\s*(?:millions?|milliards?|M|Mrd)?\s*(?:DA|DZD|Dinars?)\b[^\r\n]*/i
   );
   if (explicitLeakMatch?.[0] && !envelopeBText.includes(explicitLeakMatch[0])) {
     envelopeBText = `${envelopeBText}\n${explicitLeakMatch[0]}`.trim();
@@ -234,6 +271,7 @@ function extractDeterministicBaseline(rawText: string, tenderData?: any) {
     issuingAuthority: issuingAuthority || 'Commission des Marchés Publics',
     requiredTurnover,
     requiredCategory,
+    embeddedActualCategory,
     requiredCertifications: Array.from(certs),
     maxDeadlineDays,
     proposedDeadlineDays,
@@ -308,6 +346,7 @@ export async function POST(req: Request) {
     const resolvedReference =
       parsed?.tenderReference &&
       parsed.tenderReference !== 'N/A' &&
+      /\d/.test(String(parsed.tenderReference)) &&
       !/^(?:23-12|15-247|18-07|95-07)$/i.test(String(parsed.tenderReference).trim())
         ? parsed.tenderReference
         : baseline.tenderReference;
@@ -389,7 +428,7 @@ export async function POST(req: Request) {
       maxDeadlineDays:
         typeof extractedData.maxDeadlineDays === 'number' ? extractedData.maxDeadlineDays : null,
       actualTurnover,
-      actualCategory: extractBidderCategory(companyProfile),
+      actualCategory: baseline.embeddedActualCategory || extractBidderCategory(companyProfile),
       heldCertifications: Array.isArray(companyProfile?.certifications)
         ? companyProfile.certifications
         : [],

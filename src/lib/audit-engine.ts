@@ -156,7 +156,7 @@ export class AuditEngine {
       ''
     );
     const priceLeakRegex =
-      /(?:\b(?:DA|DZD|Dinars?)\s*[:=]?\s*\d[\d\s.,]*|\b\d[\d\s.,]*\d\s*(?:millions?\s*(?:de\s*)?|milliards?\s*(?:de\s*)?|M\s*)?(?:DA|DZD|Dinars?)\b)/i;
+      /(?:\b\d[\d\s.,]{2,}\s*(?:millions?|milliards?|M|Mrd)?\s*(?:DA|DZD|Dinars)\b|\b(?:DA|DZD|Dinars)\s*[:=]?\s*\d[\d\s.,]{2,})/i;
     if (priceLeakRegex.test(cleanEnvB)) {
       findings.push({
         id: 'TRAP-ANONYMITY-VIOLATION',
